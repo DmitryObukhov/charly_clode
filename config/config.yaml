@@ -13,9 +13,9 @@ NEURON_COUNT: 1920          # Total neurons in substrate
 HEAD_COUNT: 100             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
 
 # Charge dynamics (tuned for slower propagation)
-CHARGE_MIN: 150             # Minimum charge required for neuron to fire
-RECHARGE_RATE: 5            # Base charge accumulation per iteration
-NORMAL_TRIGGER: 300         # Threshold for cumulative signal activation
+CHARGE_MIN: 100             # Minimum charge required for neuron to fire
+RECHARGE_RATE: 10            # Base charge accumulation per iteration
+NORMAL_TRIGGER: 200         # Threshold for cumulative signal activation
 DEFAULT_CUMULATIVE_INPUT: 2000  # Total synapse weight per neuron
 
 # Elastic parameters
@@ -31,9 +31,9 @@ DEFAULT_MAX_EQ: 3           # Random initialization maximum
 STAR_LEVEL: 20              # Minimum |EQ| for star classification
 
 # Connectome generation
-LINKS_PER_NEURON_MIN: 10    # Minimum synapses per neuron
+LINKS_PER_NEURON_MIN: 3     # Minimum synapses per neuron
 LINKS_PER_NEURON_MAX: 100   # Maximum synapses per neuron
-LINK_LENGTH_MAX: 100        # Maximum index distance for connections
+LINK_LENGTH_MAX: 150        # Maximum index distance for connections
 
 # History
 HISTORY_MAXLEN: 256         # Maximum neuron activation history length
@@ -189,9 +189,18 @@ saurons_finger:
 
   - name: "recharge_boost"
     center_idx: 1000
-    radius: 200
+    radius: 100
     shape: "gaussian"
     pressure: 15
     parameter: "elastic_recharge"
-    iter_start: 400
-    iter_end: 600
+    iter_start: 450
+    iter_end: 550
+
+  - name: "trigger_boost"
+    center_idx: 1200
+    radius: 200
+    shape: "gaussian"
+    pressure: -50
+    parameter: "elastic_trigger"
+    iter_start: 500
+    iter_end: 700
