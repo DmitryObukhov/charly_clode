@@ -1,0 +1,158 @@
+# Charly Neuromorphic Simulation Configuration
+# =============================================
+
+# Random Seed (for reproducibility)
+SEED: 42
+
+# =============================================================================
+# Neural Substrate Parameters
+# =============================================================================
+
+# Neuron counts
+NEURON_COUNT: 1920          # Total neurons in substrate
+HEAD_COUNT: 200             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
+
+# Charge dynamics
+CHARGE_MIN: 100             # Minimum charge required for neuron to fire
+RECHARGE_RATE: 30           # Base charge accumulation per iteration
+NORMAL_TRIGGER: 500         # Threshold for cumulative signal activation
+DEFAULT_CUMULATIVE_INPUT: 1000  # Total synapse weight per neuron
+
+# Elastic parameters
+ELASTIC_TRIGGER_PROPAGATION: 0.75    # Elastic trigger preserved with active input
+ELASTIC_TRIGGER_DEGRADATION: 1       # Decay per iteration without input
+ELASTIC_RECHARGE_PROPAGATION: 0.75   # Elastic recharge preserved
+ELASTIC_RECHARGE_DEGRADATION: 1      # Decay per iteration
+
+# Emotional Quantum (EQ)
+EQ_MAX: 255                 # Maximum absolute EQ value
+DEFAULT_MIN_EQ: -3          # Random initialization minimum
+DEFAULT_MAX_EQ: 3           # Random initialization maximum
+STAR_LEVEL: 20              # Minimum |EQ| for star classification
+
+# Connectome generation
+LINKS_PER_NEURON_MIN: 10    # Minimum synapses per neuron
+LINKS_PER_NEURON_MAX: 200   # Maximum synapses per neuron
+LINK_LENGTH_MAX: 600        # Maximum index distance for connections
+
+# History
+HISTORY_MAXLEN: 256         # Maximum neuron activation history length
+
+# Timing
+DAY_STEPS: 1080             # Iterations per day phase
+
+# =============================================================================
+# Physical Model Parameters
+# =============================================================================
+
+WORLD_SIZE: 1920            # Size of 1D world in pixels
+
+# =============================================================================
+# Visualization Parameters
+# =============================================================================
+
+NEURON_POSITIVE_COLOR: [0, 255, 0]    # Green for positive EQ
+NEURON_NEGATIVE_COLOR: [255, 0, 0]    # Red for negative EQ
+NEURON_BG_COLOR: [0, 0, 0]            # Black background
+
+VISUALIZATION_WIDTH: 1920             # Output image width
+VISUALIZATION_HEIGHT: 1080            # Output image height
+CES_STRIP_WIDTH: 20                   # Width of ESP/ESN strip
+
+# =============================================================================
+# Input Receptors (Sensor -> Neuron mappings)
+# =============================================================================
+
+inputs:
+  # Eye sensor: dark light level
+  - signal: "eye"
+    min_val: 0.0
+    max_val: 0.3
+    neurons:
+      - idx: 0
+        eq: -25
+        name: "eye_dark"
+
+  # Eye sensor: medium light level
+  - signal: "eye"
+    min_val: 0.3
+    max_val: 0.7
+    neurons:
+      - idx: 1
+        eq: 0
+        name: "eye_medium"
+
+  # Eye sensor: bright light level
+  - signal: "eye"
+    min_val: 0.7
+    max_val: 1.0
+    neurons:
+      - idx: 2
+        eq: 25
+        name: "eye_bright"
+
+# =============================================================================
+# Output Actuators (Neuron -> Actuator mappings)
+# =============================================================================
+
+actuators:
+  left:
+    - 180
+    - 181
+    - 182
+    - 183
+    - 184
+    - 185
+    - 186
+    - 187
+    - 188
+    - 189
+
+  right:
+    - 190
+    - 191
+    - 192
+    - 193
+    - 194
+    - 195
+    - 196
+    - 197
+    - 198
+    - 199
+
+# =============================================================================
+# Innate Generators
+# =============================================================================
+
+innates:
+  # Hunger generator: fires periodically, positive motivation
+  hunger_generator:
+    idx: 50
+    eq: 25
+    charge_cycle: 100
+    inputs: []
+
+  # Satisfaction detector: responds to bright light
+  satisfaction_detector:
+    idx: 51
+    eq: 30
+    charge_cycle: 0
+    inputs:
+      - [2, 500]    # Connected to eye_bright with weight 500
+
+  # Pain detector: responds to dark
+  pain_detector:
+    idx: 52
+    eq: -30
+    charge_cycle: 0
+    inputs:
+      - [0, 500]    # Connected to eye_dark with weight 500
+
+# =============================================================================
+# Named Neurons (aliases for monitoring)
+# =============================================================================
+
+named:
+  motor_left_main: 180
+  motor_right_main: 190
+  light_seeker: 100
