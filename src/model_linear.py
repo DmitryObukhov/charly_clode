@@ -53,24 +53,30 @@ class Linear(PhysicalModel):
 
     def __init__(self,
                  world_size: int = 1920,
+                 lamp_mode: str = 'linear',
                  lamp_amplitude: Optional[float] = None,
-                 lamp_frequency: float = 0.01,
-                 lamp_center: Optional[float] = None):
+                 lamp_frequency: float = 2/1080,
+                 lamp_center: Optional[float] = None,
+                 lamp_speed: Optional[float] = None):
         """
         Initialize the Linear physical model.
 
         Args:
             world_size: Size of the 1D world in pixels (default: 1920)
-            lamp_amplitude: Lamp oscillation amplitude (default: world_size/3)
-            lamp_frequency: Lamp oscillation frequency (default: 0.01)
-            lamp_center: Center of lamp oscillation (default: world_size/2)
+            lamp_mode: 'linear' (left to right) or 'sinusoidal' (oscillating)
+            lamp_amplitude: Lamp oscillation amplitude for sinusoidal mode (default: world_size/3)
+            lamp_frequency: Lamp oscillation frequency for sinusoidal mode (default: 2/1080)
+            lamp_center: Center of lamp oscillation for sinusoidal mode (default: world_size/2)
+            lamp_speed: Lamp movement speed for linear mode (default: world_size/1080)
         """
         super().__init__()
 
         self.world_size = world_size
+        self.lamp_mode = lamp_mode
         self.lamp_amplitude = lamp_amplitude if lamp_amplitude is not None else world_size / 3
         self.lamp_frequency = lamp_frequency
         self.lamp_center = lamp_center if lamp_center is not None else world_size / 2
+        self.lamp_speed = lamp_speed if lamp_speed is not None else world_size / 1080
 
         # Initialize state
         self.agent_pos = world_size / 2
@@ -81,7 +87,7 @@ class Linear(PhysicalModel):
 
     def _calculate_lamp_position(self, iteration: int) -> float:
         """
-        Calculate lamp position based on sinusoidal movement.
+        Calculate lamp position based on movement mode.
 
         Args:
             iteration: Current iteration number
@@ -89,8 +95,14 @@ class Linear(PhysicalModel):
         Returns:
             Lamp position in pixels
         """
-        offset = self.lamp_amplitude * math.sin(2 * math.pi * self.lamp_frequency * iteration)
-        pos = self.lamp_center + offset
+        if self.lamp_mode == 'linear':
+            # Linear movement from left (0) to right (world_size-1)
+            pos = iteration * self.lamp_speed
+        else:
+            # Sinusoidal oscillation around center
+            offset = self.lamp_amplitude * math.sin(2 * math.pi * self.lamp_frequency * iteration)
+            pos = self.lamp_center + offset
+
         return max(0, min(self.world_size - 1, pos))
 
     def _calculate_illumination(self) -> float:

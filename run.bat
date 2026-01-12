@@ -7,7 +7,7 @@ setlocal
 set DAYS=%1
 set OUTPUT=%2
 
-if "%DAYS%"=="" set DAYS=3
+if "%DAYS%"=="" set DAYS=1
 if "%OUTPUT%"=="" set OUTPUT=output
 
 echo Running Charly simulation for %DAYS% day(s)...
@@ -19,4 +19,4 @@ python main.py --config ../config/config.yaml --days %DAYS% --output %OUTPUT%
 
 echo.
 echo Done.
-pause
+REM pause

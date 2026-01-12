@@ -73,3 +73,17 @@ Initial checkpoint consolidating specifications from original `main_prompt.txt` 
 
 ### Source Generation
 Generated implementation in `src/` based on prompt specifications.
+
+### Population Coding & Visualization Enhancements
+- **Population-coded inputs**: Eye sensor spreads luminosity across 50 neurons using Stevens' power law (psychophysical accuracy)
+- **Thermometer coding**: Low luminosity activates few neurons, high luminosity activates many
+- **CES waveform display**: 100px strip with dark green background, ESP (light green) and ESN (red) as waveform dots with grid
+- **Inactive head neurons**: Displayed as dark grey in visualization
+- **Linear lamp movement**: Lamp moves left-to-right once per day (1080 iterations)
+- **Physical model visualization**: Generates `physical_*.png` showing agent/lamp positions
+- **Output cleanup**: Automatically cleans output directory on restart
+- **Sauron's Finger**: Dynamic substrate modification system for pressing on neurons
+  - Configurable: center, radius, shape (gaussian/linear/flat/custom), pressure
+  - Time-bounded: iter_start, iter_end
+  - Parameters: elastic_trigger, elastic_recharge, charge, cumulative_signal
+- **Slower propagation tuning**: Adjusted charge dynamics for slower activity spread

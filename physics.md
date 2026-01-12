@@ -116,17 +116,24 @@ The "+1" offset prevents singularity at d=0 and ensures smooth falloff.
 
 ### Lamp Movement
 
-**Sinusoidal oscillation:**
+Two movement modes are supported:
 
+**Linear mode (default):**
+```
+position = iteration × speed
+```
+- `speed = world_size / 1080` (traverse entire world in 1080 steps)
+- Lamp moves from left (0) to right (world_size-1) once per day
+- Range: [0, 1919] pixels
+
+**Sinusoidal mode:**
 ```
 position = center + amplitude × sin(2π × frequency × iteration)
 ```
-
-With defaults:
 - `center = 960`
 - `amplitude = 640`
-- `frequency = 0.01`
-- Period = 1/0.01 = 100 iterations
+- `frequency = 2/1080 ≈ 0.00185` (2 periods per day)
+- Period = 540 iterations
 - Range: [320, 1600] pixels
 
 Position clamped to [0, world_size-1].
@@ -154,36 +161,64 @@ new_position = clamp(current_position + movement, 0, world_size-1)
 | `agent_pos` | [0, 1] | Normalized position (agent_pos / world_size) |
 | `lamp_pos` | [0, 1] | Normalized position (lamp_pos / world_size) |
 
-### Sensor-to-Neuron Mapping
+### Sensor-to-Neuron Mapping: Population Coding
 
-Configured in YAML `inputs` section:
+Sensors map to populations of neurons using **psychophysically-realistic encoding**. The number of active neurons reflects perceived intensity following Stevens' Power Law.
+
+#### Stevens' Power Law
+
+Human brightness perception follows:
+```
+Perceived = Physical^γ
+```
+Where γ ≈ 0.33-0.5 for brightness (typically 0.4).
+
+#### Population Encoding Algorithm
+
+For a sensor with `neuron_count` dedicated neurons:
+
+```python
+def map_sensor_to_neurons(value: float, neuron_count: int, gamma: float = 0.4) -> int:
+    """
+    Map sensor value [0,1] to number of active neurons.
+    Uses Stevens' power law for psychophysical accuracy.
+    """
+    perceived = value ** gamma
+    n_active = round(neuron_count * perceived)
+    return n_active
+```
+
+**Behavior with 50 neurons and γ=0.4:**
+| Luminosity | Perceived | Active Neurons |
+|------------|-----------|----------------|
+| 0.00 | 0.000 | 0 |
+| 0.01 | 0.063 | 3 |
+| 0.05 | 0.178 | 9 |
+| 0.10 | 0.251 | 13 |
+| 0.25 | 0.398 | 20 |
+| 0.50 | 0.574 | 29 |
+| 0.75 | 0.711 | 36 |
+| 1.00 | 1.000 | 50 |
+
+This creates a **sparse code at low intensity** (few neurons) that becomes **denser at high intensity** (many neurons), matching biological sensory systems.
+
+#### Configuration
 
 ```yaml
 inputs:
   - signal: "eye"
-    min_val: 0.0
-    max_val: 0.3
-    neurons:
-      - idx: 0
-        eq: -25
-        name: "eye_dark"
-  - signal: "eye"
-    min_val: 0.3
-    max_val: 0.7
-    neurons:
-      - idx: 1
-        eq: -50
-        name: "eye_medium"
-  - signal: "eye"
-    min_val: 0.7
-    max_val: 1.0
-    neurons:
-      - idx: 2
-        eq: -100
-        name: "eye_bright"
+    type: "population"           # Population coding mode
+    neuron_start: 0              # First neuron index
+    neuron_count: 50             # Number of neurons in population
+    gamma: 0.4                   # Stevens' power law exponent
+    eq_gradient:                 # EQ distribution across population
+      low: -20                   # EQ for low-index neurons (dark-responsive)
+      high: 20                   # EQ for high-index neurons (bright-responsive)
 ```
 
-A neuron activates when the sensor value falls within its configured range. Multiple ranges enable multi-way sensory encoding.
+**Activation pattern**: When `n_active` neurons should fire, neurons at indices `neuron_start` through `neuron_start + n_active - 1` are activated. This creates a **thermometer code** where brighter light activates more neurons progressively.
+
+**EQ gradient**: Neurons receive linearly interpolated EQ values from `low` to `high` across the population, creating an emotional gradient from dark (negative valence) to bright (positive valence).
 
 ---
 

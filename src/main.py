@@ -98,6 +98,42 @@ def create_video(image_dir: str,
         return False
 
 
+def clean_output_directory(output_dir: str) -> None:
+    """
+    Clean up the output directory before starting a new simulation.
+
+    Removes all PNG, MP4, and other generated files.
+
+    Args:
+        output_dir: Directory to clean
+    """
+    import glob
+
+    if not os.path.exists(output_dir):
+        return
+
+    # Patterns of files to remove
+    patterns = [
+        "day_*.png",
+        "faceshot_*.png",
+        "physical_*.png",
+        "*.mp4"
+    ]
+
+    removed_count = 0
+    for pattern in patterns:
+        files = glob.glob(os.path.join(output_dir, pattern))
+        for f in files:
+            try:
+                os.remove(f)
+                removed_count += 1
+            except OSError as e:
+                print(f"Warning: Could not remove {f}: {e}")
+
+    if removed_count > 0:
+        print(f"Cleaned output directory: removed {removed_count} file(s)")
+
+
 def run_simulation(config_path: str,
                    num_days: int,
                    output_dir: str,
@@ -120,7 +156,8 @@ def run_simulation(config_path: str,
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
-    # Create output directory
+    # Clean and create output directory
+    clean_output_directory(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     # Create physical model
@@ -154,6 +191,14 @@ def run_simulation(config_path: str,
             ces_strip_width=config.get('CES_STRIP_WIDTH', 20)
         )
 
+        # Save physical model visualization
+        physical_filename = os.path.join(output_dir, f"physical_{day:04d}.png")
+        physical_model.save_visualization(
+            physical_filename,
+            width=config.get('VISUALIZATION_WIDTH', 1920),
+            height=config.get('VISUALIZATION_HEIGHT', 1080)
+        )
+
         # Save faceshot
         faceshot_filename = os.path.join(output_dir, f"faceshot_{day:04d}.png")
         charly.faceshot(1024, 1024, faceshot_filename)
@@ -174,6 +219,7 @@ def run_simulation(config_path: str,
     # Print output summary
     print(f"\nOutputs saved to: {output_dir}/")
     print(f"  - day_*.png: Neural activity visualizations")
+    print(f"  - physical_*.png: Physical model (agent/lamp positions)")
     print(f"  - faceshot_*.png: Connectome structure")
     if not no_video and num_days > 1:
         print(f"  - simulation.mp4: Compiled video")
@@ -199,8 +245,8 @@ Examples:
     parser.add_argument('--days', '-d', type=int, default=1,
                        help='Number of days to simulate (default: 1)')
 
-    parser.add_argument('--output', '-o', type=str, default='output',
-                       help='Output directory for results (default: output)')
+    parser.add_argument('--output', '-o', type=str, default='../output',
+                       help='Output directory for results (default: ../output)')
 
     parser.add_argument('--fps', type=int, default=30,
                        help='Video frames per second (default: 30)')

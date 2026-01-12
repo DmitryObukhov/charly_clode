@@ -10,13 +10,13 @@ SEED: 42
 
 # Neuron counts
 NEURON_COUNT: 1920          # Total neurons in substrate
-HEAD_COUNT: 200             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
+HEAD_COUNT: 100             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
 
-# Charge dynamics
-CHARGE_MIN: 100             # Minimum charge required for neuron to fire
-RECHARGE_RATE: 30           # Base charge accumulation per iteration
-NORMAL_TRIGGER: 500         # Threshold for cumulative signal activation
-DEFAULT_CUMULATIVE_INPUT: 1000  # Total synapse weight per neuron
+# Charge dynamics (tuned for slower propagation)
+CHARGE_MIN: 150             # Minimum charge required for neuron to fire
+RECHARGE_RATE: 5            # Base charge accumulation per iteration
+NORMAL_TRIGGER: 300         # Threshold for cumulative signal activation
+DEFAULT_CUMULATIVE_INPUT: 2000  # Total synapse weight per neuron
 
 # Elastic parameters
 ELASTIC_TRIGGER_PROPAGATION: 0.75    # Elastic trigger preserved with active input
@@ -32,8 +32,8 @@ STAR_LEVEL: 20              # Minimum |EQ| for star classification
 
 # Connectome generation
 LINKS_PER_NEURON_MIN: 10    # Minimum synapses per neuron
-LINKS_PER_NEURON_MAX: 200   # Maximum synapses per neuron
-LINK_LENGTH_MAX: 600        # Maximum index distance for connections
+LINKS_PER_NEURON_MAX: 100   # Maximum synapses per neuron
+LINK_LENGTH_MAX: 100        # Maximum index distance for connections
 
 # History
 HISTORY_MAXLEN: 256         # Maximum neuron activation history length
@@ -54,42 +54,34 @@ WORLD_SIZE: 1920            # Size of 1D world in pixels
 NEURON_POSITIVE_COLOR: [0, 255, 0]    # Green for positive EQ
 NEURON_NEGATIVE_COLOR: [255, 0, 0]    # Red for negative EQ
 NEURON_BG_COLOR: [0, 0, 0]            # Black background
+HEAD_INACTIVE_COLOR: [14, 14, 14]     # Dark grey for inactive head neurons
 
 VISUALIZATION_WIDTH: 1920             # Output image width
 VISUALIZATION_HEIGHT: 1080            # Output image height
-CES_STRIP_WIDTH: 20                   # Width of ESP/ESN strip
+CES_STRIP_WIDTH: 100                  # Width of ESP/ESN waveform strip
+
+# CES Strip Colors (Cumulative Emotional State)
+CES_BG_COLOR: [14, 14, 14]              # Dark green background
+CES_ESP_COLOR: [14, 238, 14]        # Light green for ESP (positive)
+CES_ESN_COLOR: [235, 14, 14]            # Red for ESN (negative)
+CES_GRID_COLOR: [24, 24, 24]          # Dark grey grid lines
+CES_GRID_SPACING: 25                  # Grid line spacing in pixels
 
 # =============================================================================
 # Input Receptors (Sensor -> Neuron mappings)
+# Population coding with Stevens' power law for psychophysical accuracy
 # =============================================================================
 
 inputs:
-  # Eye sensor: dark light level
+  # Eye sensor: 50-neuron population with psychophysical mapping
   - signal: "eye"
-    min_val: 0.0
-    max_val: 0.3
-    neurons:
-      - idx: 0
-        eq: -25
-        name: "eye_dark"
-
-  # Eye sensor: medium light level
-  - signal: "eye"
-    min_val: 0.3
-    max_val: 0.7
-    neurons:
-      - idx: 1
-        eq: 0
-        name: "eye_medium"
-
-  # Eye sensor: bright light level
-  - signal: "eye"
-    min_val: 0.7
-    max_val: 1.0
-    neurons:
-      - idx: 2
-        eq: 25
-        name: "eye_bright"
+    type: "population"
+    neuron_start: 0              # First neuron index
+    neuron_count: 50             # Spread signal across 50 neurons
+    gamma: 0.4                   # Stevens' power law exponent for brightness
+    eq_gradient:                 # All negative EQ (light perception is costly)
+      low: -10                   # Low-index neurons (dim light)
+      high: -120                 # High-index neurons (bright light)
 
 # =============================================================================
 # Output Actuators (Neuron -> Actuator mappings)
@@ -127,26 +119,29 @@ actuators:
 innates:
   # Hunger generator: fires periodically, positive motivation
   hunger_generator:
-    idx: 50
+    idx: 60
     eq: 25
     charge_cycle: 100
     inputs: []
 
-  # Satisfaction detector: responds to bright light
+  # Satisfaction detector: responds to bright light (high-index eye neurons)
   satisfaction_detector:
-    idx: 51
+    idx: 61
     eq: 30
     charge_cycle: 0
     inputs:
-      - [2, 500]    # Connected to eye_bright with weight 500
+      - [45, 300]    # Connected to eye_45 (bright-responsive)
+      - [48, 400]    # Connected to eye_48 (very bright-responsive)
+      - [49, 500]    # Connected to eye_49 (maximum brightness)
 
-  # Pain detector: responds to dark
+  # Pain detector: responds to darkness (absence of light)
+  # Fires when eye population is mostly inactive
   pain_detector:
-    idx: 52
+    idx: 62
     eq: -30
     charge_cycle: 0
     inputs:
-      - [0, 500]    # Connected to eye_dark with weight 500
+      - [0, 800]    # Connected to eye_0 (always fires if any light)
 
 # =============================================================================
 # Named Neurons (aliases for monitoring)
@@ -156,3 +151,47 @@ named:
   motor_left_main: 180
   motor_right_main: 190
   light_seeker: 100
+  eye_low: 0                # First eye neuron (always active if any light)
+  eye_mid: 25               # Middle eye neuron
+  eye_high: 49              # Last eye neuron (only active at max brightness)
+  hunger: 60
+  satisfaction: 61
+  pain: 62
+
+# =============================================================================
+# Sauron's Finger - Dynamic Substrate Modification
+# =============================================================================
+# Press on neurons to modify their parameters during simulation.
+# Each finger press affects neurons in a region with controllable shape.
+#
+# Parameters:
+#   center_idx:   Center neuron index for the press
+#   radius:       Number of neurons affected on each side of center
+#   shape:        Pressure distribution: "gaussian", "linear", "flat", "custom"
+#   pressure:     Strength of the effect (added to parameter)
+#   parameter:    Neuron attribute to modify:
+#                 - elastic_trigger, elastic_recharge, charge, cumulative_signal
+#   iter_start:   First iteration when finger is active (default: 0)
+#   iter_end:     Last iteration when finger is active (default: DAY_STEPS)
+#   shape_values: (optional) Array of floats [0..1] for custom shape
+#                 Length should be 2*radius+1, centered on press point
+
+saurons_finger:
+  # Example: Increase sensitivity at index 1000 ± 100 neurons, iterations 200-300
+  # - name: "sensitivity_boost"
+  #   center_idx: 1000
+  #   radius: 100
+  #   shape: "gaussian"
+  #   pressure: 50
+  #   parameter: "elastic_trigger"
+  #   iter_start: 200
+  #   iter_end: 300
+
+  - name: "recharge_boost"
+    center_idx: 1000
+    radius: 200
+    shape: "gaussian"
+    pressure: 15
+    parameter: "elastic_recharge"
+    iter_start: 400
+    iter_end: 600

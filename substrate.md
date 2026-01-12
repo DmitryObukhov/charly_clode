@@ -137,35 +137,36 @@ Generates random synaptic connections for body neurons (see Connectome section).
 
 ### 3. `_configure_receptors()`
 
-Maps physical model sensors to head neurons:
+Maps physical model sensors to head neurons using population coding:
 
 ```yaml
 # config.yaml
 inputs:
   - signal: "eye"
-    min_val: 0.0
-    max_val: 0.3
-    neurons:
-      - idx: 0
-        eq: -25
-        name: "eye_dark"
-  - signal: "eye"
-    min_val: 0.3
-    max_val: 0.7
-    neurons:
-      - idx: 1
-        eq: -50
-        name: "eye_medium"
+    type: "population"
+    neuron_start: 0
+    neuron_count: 50
+    gamma: 0.4
+    eq_gradient:
+      low: -20
+      high: 20
 ```
+
+**Initialization process:**
+1. Assigns neurons from `neuron_start` to `neuron_start + neuron_count - 1`
+2. Sets each neuron's EQ via linear interpolation between `eq_gradient.low` and `eq_gradient.high`
+3. Names neurons as `{signal}_{index}` (e.g., "eye_0", "eye_1", ..., "eye_49")
 
 **Result structure:**
 ```python
 self.receptors = {
-    "eye": [
-        {'min_val': 0.0, 'max_val': 0.3, 'neurons': [0]},
-        {'min_val': 0.3, 'max_val': 0.7, 'neurons': [1]},
-        ...
-    ]
+    "eye": {
+        'type': 'population',
+        'neuron_start': 0,
+        'neuron_count': 50,
+        'gamma': 0.4,
+        'eq_gradient': {'low': -20, 'high': 20}
+    }
 }
 ```
 
@@ -295,20 +296,32 @@ Single iteration of day simulation:
 
 ### Input Processing: `_process_inputs()`
 
-Activates receptor neurons based on sensor values:
+Activates receptor neurons using population coding with Stevens' power law:
 
 ```python
 def _process_inputs(self) -> None:
     sensor_values = self.physical_model.get(sensor_names)
 
-    for signal, receptor_configs in self.receptors.items():
+    for signal, cfg in self.receptors.items():
         value = sensor_values.get(signal, 0.0)
 
-        for cfg in receptor_configs:
-            if cfg['min_val'] <= value <= cfg['max_val']:
-                for idx in cfg['neurons']:
-                    self.current[idx].active = True
+        if cfg['type'] == 'population':
+            # Stevens' power law: perceived = physical^gamma
+            gamma = cfg.get('gamma', 0.4)
+            perceived = value ** gamma
+
+            # Calculate number of active neurons
+            n_active = round(cfg['neuron_count'] * perceived)
+
+            # Activate neurons 0 through n_active-1 (thermometer code)
+            start = cfg['neuron_start']
+            for i in range(n_active):
+                self.current[start + i].active = True
 ```
+
+**Thermometer Code**: Neurons activate from index 0 upward. At low luminosity, only the first few neurons fire. At high luminosity, most or all neurons in the population fire. This creates a graded representation where:
+- Darkness → sparse activity (few neurons, negative-EQ dominated)
+- Brightness → dense activity (many neurons, positive-EQ dominated)
 
 ### Innate Processing: `_process_innates()`
 

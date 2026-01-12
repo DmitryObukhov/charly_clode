@@ -183,6 +183,14 @@ class Charly:
         self.pos_color = tuple(config.get('NEURON_POSITIVE_COLOR', [0, 255, 0]))
         self.neg_color = tuple(config.get('NEURON_NEGATIVE_COLOR', [255, 0, 0]))
         self.bg_color = tuple(config.get('NEURON_BG_COLOR', [0, 0, 0]))
+        self.head_inactive_color = tuple(config.get('HEAD_INACTIVE_COLOR', [40, 40, 40]))
+
+        # CES strip visualization
+        self.ces_bg_color = tuple(config.get('CES_BG_COLOR', [0, 40, 0]))
+        self.ces_esp_color = tuple(config.get('CES_ESP_COLOR', [144, 238, 144]))
+        self.ces_esn_color = tuple(config.get('CES_ESN_COLOR', [255, 0, 0]))
+        self.ces_grid_color = tuple(config.get('CES_GRID_COLOR', [40, 40, 40]))
+        self.ces_grid_spacing = config.get('CES_GRID_SPACING', 10)
 
         # Initialize random generator
         self.rng = random.Random(self.seed)
@@ -203,6 +211,9 @@ class Charly:
         # Star neurons
         self.stars: List[int] = []
 
+        # Sauron's Finger - dynamic substrate modification
+        self.finger_presses: List[Dict] = []
+
         # History
         self.day_history: List[Dict] = []
         self.iteration = 0
@@ -211,6 +222,7 @@ class Charly:
         # Verify and initialize
         self._verify_physical_model()
         self._init_substrate()
+        self._configure_saurons_finger()
 
         self.log(f"Charly initialized: {self.neuron_count} neurons, head={self.head_count}")
 
@@ -294,35 +306,81 @@ class Charly:
         self.log(f"Connectome built: {len(self.connectome.synapses)} synapses")
 
     def _configure_receptors(self) -> None:
-        """Configure input receptors from config."""
+        """Configure input receptors from config.
+
+        Supports two modes:
+        - 'population': Spread signal across N neurons using Stevens' power law
+        - 'range' (legacy): Activate neurons when signal is in a value range
+        """
         for input_cfg in self.config.get('inputs', []):
             signal = input_cfg.get('signal')
             if not signal:
                 continue
 
-            if signal not in self.receptors:
-                self.receptors[signal] = []
+            input_type = input_cfg.get('type', 'range')
 
-            receptor_config = {
-                'min_val': input_cfg.get('min_val', 0.0),
-                'max_val': input_cfg.get('max_val', 1.0),
-                'neurons': []
-            }
+            if input_type == 'population':
+                # Population coding with Stevens' power law
+                neuron_start = input_cfg.get('neuron_start', 0)
+                neuron_count = input_cfg.get('neuron_count', 50)
+                gamma = input_cfg.get('gamma', 0.4)
+                eq_gradient = input_cfg.get('eq_gradient', {'low': -20, 'high': 20})
 
-            for neuron_cfg in input_cfg.get('neurons', []):
-                idx = neuron_cfg.get('idx')
-                if idx is not None and 0 <= idx < self.neuron_count:
-                    eq = neuron_cfg.get('eq', self.current[idx].eq)
-                    name = neuron_cfg.get('name', f"receptor_{signal}_{idx}")
+                # Configure neurons in the population
+                eq_low = eq_gradient.get('low', -20)
+                eq_high = eq_gradient.get('high', 20)
 
-                    self.current[idx].eq = eq
-                    self.current[idx].name = name
-                    self.next[idx].eq = eq
-                    self.next[idx].name = name
+                for i in range(neuron_count):
+                    idx = neuron_start + i
+                    if 0 <= idx < self.neuron_count:
+                        # Linear interpolation of EQ across the population
+                        t = i / (neuron_count - 1) if neuron_count > 1 else 0.5
+                        eq = int(eq_low + t * (eq_high - eq_low))
+                        name = f"{signal}_{i}"
 
-                    receptor_config['neurons'].append(idx)
+                        self.current[idx].eq = eq
+                        self.current[idx].name = name
+                        self.next[idx].eq = eq
+                        self.next[idx].name = name
 
-            self.receptors[signal].append(receptor_config)
+                self.receptors[signal] = {
+                    'type': 'population',
+                    'neuron_start': neuron_start,
+                    'neuron_count': neuron_count,
+                    'gamma': gamma,
+                    'eq_gradient': eq_gradient
+                }
+                self.log(f"Configured population receptor '{signal}': {neuron_count} neurons, gamma={gamma}")
+
+            else:
+                # Legacy range-based activation
+                if signal not in self.receptors:
+                    self.receptors[signal] = []
+
+                receptor_config = {
+                    'type': 'range',
+                    'min_val': input_cfg.get('min_val', 0.0),
+                    'max_val': input_cfg.get('max_val', 1.0),
+                    'neurons': []
+                }
+
+                for neuron_cfg in input_cfg.get('neurons', []):
+                    idx = neuron_cfg.get('idx')
+                    if idx is not None and 0 <= idx < self.neuron_count:
+                        eq = neuron_cfg.get('eq', self.current[idx].eq)
+                        name = neuron_cfg.get('name', f"receptor_{signal}_{idx}")
+
+                        self.current[idx].eq = eq
+                        self.current[idx].name = name
+                        self.next[idx].eq = eq
+                        self.next[idx].name = name
+
+                        receptor_config['neurons'].append(idx)
+
+                if isinstance(self.receptors.get(signal), list):
+                    self.receptors[signal].append(receptor_config)
+                else:
+                    self.receptors[signal] = [receptor_config]
 
         self.log(f"Configured {len(self.receptors)} receptor signals")
 
@@ -384,24 +442,166 @@ class Charly:
 
         self.log(f"Identified {len(self.stars)} star neurons")
 
+    def _configure_saurons_finger(self) -> None:
+        """Configure Sauron's Finger presses from config."""
+        finger_configs = self.config.get('saurons_finger', [])
+        if not finger_configs:
+            return
+
+        for cfg in finger_configs:
+            if not cfg:  # Skip empty/commented entries
+                continue
+
+            center_idx = cfg.get('center_idx', 0)
+            radius = cfg.get('radius', 10)
+            shape = cfg.get('shape', 'gaussian')
+            pressure = cfg.get('pressure', 0)
+            parameter = cfg.get('parameter', 'elastic_trigger')
+            iter_start = cfg.get('iter_start', 0)
+            iter_end = cfg.get('iter_end', self.day_steps)
+            shape_values = cfg.get('shape_values', None)
+
+            # Pre-calculate shape multipliers for the region
+            multipliers = self._calculate_finger_shape(radius, shape, shape_values)
+
+            finger_press = {
+                'name': cfg.get('name', f'finger_{center_idx}'),
+                'center_idx': center_idx,
+                'radius': radius,
+                'pressure': pressure,
+                'parameter': parameter,
+                'iter_start': iter_start,
+                'iter_end': iter_end,
+                'multipliers': multipliers
+            }
+            self.finger_presses.append(finger_press)
+
+        if self.finger_presses:
+            self.log(f"Configured {len(self.finger_presses)} Sauron's Finger presses")
+
+    def _calculate_finger_shape(self, radius: int, shape: str,
+                                 custom_values: List[float] = None) -> List[float]:
+        """
+        Calculate shape multipliers for finger press.
+
+        Args:
+            radius: Number of neurons on each side of center
+            shape: Shape type ('gaussian', 'linear', 'flat', 'custom')
+            custom_values: Custom shape array for 'custom' shape
+
+        Returns:
+            List of multipliers [0..1] of length 2*radius+1
+        """
+        width = 2 * radius + 1
+
+        if shape == 'custom' and custom_values:
+            # Use custom values, pad or truncate to fit
+            if len(custom_values) >= width:
+                return custom_values[:width]
+            else:
+                # Pad with zeros
+                padding = width - len(custom_values)
+                left_pad = padding // 2
+                right_pad = padding - left_pad
+                return [0.0] * left_pad + custom_values + [0.0] * right_pad
+
+        elif shape == 'flat':
+            # Uniform pressure across region
+            return [1.0] * width
+
+        elif shape == 'linear':
+            # Linear falloff from center
+            multipliers = []
+            for i in range(width):
+                distance = abs(i - radius)
+                multipliers.append(1.0 - distance / (radius + 1))
+            return multipliers
+
+        else:  # gaussian (default)
+            # Gaussian falloff from center
+            sigma = radius / 2.5  # 2.5 sigma covers most of the radius
+            multipliers = []
+            for i in range(width):
+                distance = abs(i - radius)
+                multipliers.append(math.exp(-0.5 * (distance / sigma) ** 2))
+            return multipliers
+
+    def _apply_saurons_finger(self) -> None:
+        """Apply active finger presses to the substrate."""
+        for finger in self.finger_presses:
+            # Check if finger is active at current iteration
+            if not (finger['iter_start'] <= self.iteration <= finger['iter_end']):
+                continue
+
+            center = finger['center_idx']
+            radius = finger['radius']
+            pressure = finger['pressure']
+            parameter = finger['parameter']
+            multipliers = finger['multipliers']
+
+            # Apply pressure to neurons in range
+            for i, mult in enumerate(multipliers):
+                idx = center - radius + i
+                if 0 <= idx < self.neuron_count:
+                    delta = pressure * mult
+                    neuron = self.current[idx]
+
+                    # Apply to the specified parameter
+                    if parameter == 'elastic_trigger':
+                        neuron.elastic_trigger += delta
+                    elif parameter == 'elastic_recharge':
+                        neuron.elastic_recharge += delta
+                    elif parameter == 'charge':
+                        neuron.charge += delta
+                    elif parameter == 'cumulative_signal':
+                        neuron.cumulative_signal += delta
+
     def _process_inputs(self) -> None:
-        """Process sensory inputs and activate receptor neurons."""
+        """Process sensory inputs and activate receptor neurons.
+
+        Supports two modes:
+        - 'population': Stevens' power law with thermometer coding
+        - 'range' (legacy): Binary activation based on value ranges
+        """
         sensor_names = list(self.receptors.keys())
         if not sensor_names:
             return
 
         sensor_values = self.physical_model.get(sensor_names)
 
-        for signal, receptor_configs in self.receptors.items():
+        for signal, receptor_cfg in self.receptors.items():
             value = sensor_values.get(signal, 0.0)
 
-            for receptor_cfg in receptor_configs:
-                min_val = receptor_cfg['min_val']
-                max_val = receptor_cfg['max_val']
+            if isinstance(receptor_cfg, dict) and receptor_cfg.get('type') == 'population':
+                # Population coding with Stevens' power law
+                gamma = receptor_cfg.get('gamma', 0.4)
+                neuron_start = receptor_cfg['neuron_start']
+                neuron_count = receptor_cfg['neuron_count']
 
-                if min_val <= value <= max_val:
-                    for idx in receptor_cfg['neurons']:
+                # Stevens' power law: perceived = physical^gamma
+                # Clamp value to [0, 1] range
+                value = max(0.0, min(1.0, value))
+                perceived = value ** gamma
+
+                # Calculate number of active neurons (thermometer code)
+                n_active = round(neuron_count * perceived)
+
+                # Activate neurons from start to start + n_active - 1
+                for i in range(n_active):
+                    idx = neuron_start + i
+                    if 0 <= idx < self.neuron_count:
                         self.current[idx].active = True
+
+            elif isinstance(receptor_cfg, list):
+                # Legacy range-based activation
+                for cfg in receptor_cfg:
+                    if cfg.get('type') == 'range' or 'min_val' in cfg:
+                        min_val = cfg.get('min_val', 0.0)
+                        max_val = cfg.get('max_val', 1.0)
+
+                        if min_val <= value <= max_val:
+                            for idx in cfg.get('neurons', []):
+                                self.current[idx].active = True
 
     def _process_innates(self) -> None:
         """Process innate generator neurons."""
@@ -517,6 +717,12 @@ class Charly:
 
         self._process_inputs()
         self._process_innates()
+        self._apply_saurons_finger()
+
+        # Copy head neuron activations to next array so they're preserved
+        # and included in emotional state calculation
+        for i in range(self.head_count):
+            self.next[i].active = self.current[i].active
 
         star_values = self._collect_star_values()
 
@@ -626,6 +832,9 @@ class Charly:
                         color = tuple(int(c * brightness) for c in self.neg_color)
 
                     img_array[y, x] = color
+                elif x < self.head_count:
+                    # Show inactive head neurons as dark grey
+                    img_array[y, x] = self.head_inactive_color
 
             if ces_strip_width > 0:
                 esp = step_record['esp']
@@ -635,13 +844,24 @@ class Charly:
                 esn_normalized = esn / max_esn if max_esn > 0 else 0
 
                 strip_start = self.neuron_count
+
+                # Fill CES strip with dark green background
+                img_array[y, strip_start:strip_start + ces_strip_width] = self.ces_bg_color
+
+                # Draw grid lines (vertical lines at regular intervals)
+                for gx in range(0, ces_strip_width, self.ces_grid_spacing):
+                    img_array[y, strip_start + gx] = self.ces_grid_color
+
+                # Draw ESP as light green dot (position indicates value)
+                # ESP maps to left half of strip (0 = left edge, max = center)
                 half_width = ces_strip_width // 2
+                esp_x = int(esp_normalized * (half_width - 1))
+                img_array[y, strip_start + esp_x] = self.ces_esp_color
 
-                esp_intensity = int(255 * esp_normalized)
-                img_array[y, strip_start:strip_start + half_width] = (0, esp_intensity, 0)
-
-                esn_intensity = int(255 * esn_normalized)
-                img_array[y, strip_start + half_width:strip_start + ces_strip_width] = (esn_intensity, 0, 0)
+                # Draw ESN as red dot (position indicates value)
+                # ESN maps to right half of strip (0 = center, max = right edge)
+                esn_x = half_width + int(esn_normalized * (half_width - 1))
+                img_array[y, strip_start + esn_x] = self.ces_esn_color
 
         raw_image = Image.fromarray(img_array, 'RGB')
 
@@ -656,8 +876,10 @@ class Charly:
                           filename: str,
                           width: Optional[int] = None,
                           height: Optional[int] = None,
-                          ces_strip_width: int = 20) -> str:
+                          ces_strip_width: Optional[int] = None) -> str:
         """Save visualization to a PNG file."""
+        if ces_strip_width is None:
+            ces_strip_width = self.config.get('CES_STRIP_WIDTH', 100)
         img = self.visualize(width, height, ces_strip_width=ces_strip_width)
         os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else '.', exist_ok=True)
         img.save(filename, 'PNG')

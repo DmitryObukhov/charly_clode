@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Directory Structure
 
 ```
-socio/
+charly/
 ├── run.bat             # Run the simulation
 ├── build.bat           # Rebuild sources using Claude Code
 ├── config/
