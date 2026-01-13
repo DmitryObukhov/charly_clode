@@ -9,13 +9,13 @@ SEED: 42
 # =============================================================================
 
 # Neuron counts
-NEURON_COUNT: 1920          # Total neurons in substrate
-HEAD_COUNT: 100             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
+NEURON_COUNT: 21920          # Total neurons in substrate
+HEAD_COUNT: 2000             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
 
 # Charge dynamics (tuned for slower propagation)
 CHARGE_MIN: 100             # Minimum charge required for neuron to fire
-RECHARGE_RATE: 10            # Base charge accumulation per iteration
-NORMAL_TRIGGER: 200         # Threshold for cumulative signal activation
+RECHARGE_RATE: 20            # Base charge accumulation per iteration
+NORMAL_TRIGGER: 100         # Threshold for cumulative signal activation
 DEFAULT_CUMULATIVE_INPUT: 2000  # Total synapse weight per neuron
 
 # Elastic parameters
@@ -31,9 +31,9 @@ DEFAULT_MAX_EQ: 3           # Random initialization maximum
 STAR_LEVEL: 20              # Minimum |EQ| for star classification
 
 # Connectome generation
-LINKS_PER_NEURON_MIN: 3     # Minimum synapses per neuron
-LINKS_PER_NEURON_MAX: 100   # Maximum synapses per neuron
-LINK_LENGTH_MAX: 150        # Maximum index distance for connections
+LINKS_PER_NEURON_MIN: 30     # Minimum synapses per neuron
+LINKS_PER_NEURON_MAX: 200   # Maximum synapses per neuron
+LINK_LENGTH_MAX: 350        # Maximum index distance for connections
 
 # History
 HISTORY_MAXLEN: 256         # Maximum neuron activation history length
@@ -76,12 +76,12 @@ inputs:
   # Eye sensor: 50-neuron population with psychophysical mapping
   - signal: "eye"
     type: "population"
-    neuron_start: 0              # First neuron index
-    neuron_count: 50             # Spread signal across 50 neurons
+    neuron_start: 1500              # First neuron index
+    neuron_count: 500             # Spread signal across 50 neurons
     gamma: 0.4                   # Stevens' power law exponent for brightness
     eq_gradient:                 # All negative EQ (light perception is costly)
       low: -10                   # Low-index neurons (dim light)
-      high: -120                 # High-index neurons (bright light)
+      high: -200                 # High-index neurons (bright light)
 
 # =============================================================================
 # Output Actuators (Neuron -> Actuator mappings)

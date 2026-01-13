@@ -5,7 +5,9 @@
       "Bash(git config:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(python src/main.py:*)",
+      "Bash(python:*)"
     ]
   }
 }
