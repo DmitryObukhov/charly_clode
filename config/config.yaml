@@ -11,6 +11,7 @@ SEED: 42
 # Neuron counts
 NEURON_COUNT: 21920          # Total neurons in substrate
 HEAD_COUNT: 2000             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
+TAIL_COUNT: 20000            # Motor/output region start index
 
 # Charge dynamics (tuned for slower propagation)
 CHARGE_MIN: 100             # Minimum charge required for neuron to fire
@@ -34,6 +35,41 @@ STAR_LEVEL: 20              # Minimum |EQ| for star classification
 LINKS_PER_NEURON_MIN: 30     # Minimum synapses per neuron
 LINKS_PER_NEURON_MAX: 200   # Maximum synapses per neuron
 LINK_LENGTH_MAX: 350        # Maximum index distance for connections
+
+# Link length distribution bands (percent of LINK_LENGTH_MAX)
+LINK_LEN_SHORT_RANGE: 10    # Short links: 0% to 10% of max (0-35 for max=350)
+LINK_LEN_LONG_RANGE: 10     # Long links: 90% to 100% of max (315-350 for max=350)
+                            # Mid links: 10% to 90% of max (35-315 for max=350)
+
+# Default distribution [short%, mid%, long%] - must sum to 100
+LINK_DISTRIBUTION_DEFAULT: [80, 15, 5]
+
+# =============================================================================
+# Connectome Distribution Segments
+# =============================================================================
+# Define link length distribution by neuron ranges.
+# Each segment specifies: start, end, distribution [short%, mid%, long%]
+# Neurons not covered use LINK_DISTRIBUTION_DEFAULT.
+#
+# "Zebra" pattern: alternating local (80-15-5) and distant (5-15-80) connectivity
+
+connectome_distribution:
+  # Segment 1: neurons 2000-4000 - local connectivity
+  - start: 2000
+    end: 6000
+    distribution: [90, 5, 5]
+
+  # Segment 2: neurons 4000-6000 - distant connectivity
+  - start: 6000
+    end: 10000
+    distribution: [1, 1, 98]
+
+  # Segment 3: neurons 6000-8000 - local connectivity
+  - start: 10000
+    end: 22000
+    distribution: [98, 2, 0]
+
+
 
 # History
 HISTORY_MAXLEN: 256         # Maximum neuron activation history length
@@ -59,6 +95,7 @@ HEAD_INACTIVE_COLOR: [14, 14, 14]     # Dark grey for inactive head neurons
 VISUALIZATION_WIDTH: 1920             # Output image width
 VISUALIZATION_HEIGHT: 1080            # Output image height
 CES_STRIP_WIDTH: 100                  # Width of ESP/ESN waveform strip
+ACTUATOR_STRIP_WIDTH: 100             # Width of actuator output strip
 
 # CES Strip Colors (Cumulative Emotional State)
 CES_BG_COLOR: [14, 14, 14]              # Dark green background
@@ -86,31 +123,17 @@ inputs:
 # =============================================================================
 # Output Actuators (Neuron -> Actuator mappings)
 # =============================================================================
+# Each actuator: name, start, count, default_eq, color
+# Neurons from start to start+count-1 are assigned to the actuator
+# EQ is assigned to each participating neuron
+# Color is used for visualization in the actuator strip
 
 actuators:
-  left:
-    - 180
-    - 181
-    - 182
-    - 183
-    - 184
-    - 185
-    - 186
-    - 187
-    - 188
-    - 189
-
-  right:
-    - 190
-    - 191
-    - 192
-    - 193
-    - 194
-    - 195
-    - 196
-    - 197
-    - 198
-    - 199
+  - name: "motor"
+    start: 20000              # Near TAIL_COUNT
+    count: 100                # 100 neurons
+    default_eq: 25            # Positive EQ for motor activity
+    color: [0, 200, 255]      # Cyan for motor output
 
 # =============================================================================
 # Innate Generators
@@ -148,8 +171,9 @@ innates:
 # =============================================================================
 
 named:
-  motor_left_main: 180
-  motor_right_main: 190
+  motor_start: 20000        # First motor neuron (at TAIL_COUNT)
+  motor_mid: 20050          # Middle motor neuron
+  motor_end: 20099          # Last motor neuron
   light_seeker: 100
   eye_low: 0                # First eye neuron (always active if any light)
   eye_mid: 25               # Middle eye neuron
@@ -161,46 +185,55 @@ named:
 # =============================================================================
 # Sauron's Finger - Dynamic Substrate Modification
 # =============================================================================
-# Press on neurons to modify their parameters during simulation.
-# Each finger press affects neurons in a region with controllable shape.
+# Press on neurons to modify their parameters using executable formulas.
 #
 # Parameters:
-#   center_idx:   Center neuron index for the press
-#   radius:       Number of neurons affected on each side of center
-#   shape:        Pressure distribution: "gaussian", "linear", "flat", "custom"
-#   pressure:     Strength of the effect (added to parameter)
-#   parameter:    Neuron attribute to modify:
-#                 - elastic_trigger, elastic_recharge, charge, cumulative_signal
-#   iter_start:   First iteration when finger is active (default: 0)
-#   iter_end:     Last iteration when finger is active (default: DAY_STEPS)
-#   shape_values: (optional) Array of floats [0..1] for custom shape
-#                 Length should be 2*radius+1, centered on press point
+#   name:     Identifier for the finger press
+#   x:        Center neuron index
+#   r:        Radius (neurons affected on each side of center)
+#   field:    Neuron attribute to modify:
+#             elastic_trigger, elastic_recharge, charge, cumulative_signal
+#   formula:  Executable formula for final effect: neuron[idx].field = eval(formula)
+#   shape:    Radial distribution formula (evaluated per neuron)
+#   rows:     Temporal activation windows with pressure distribution
+#             Each row: start, end, formula
+#
+# Available macros in formulas:
+#   IDX   - Current neuron index
+#   X     - Finger center (x)
+#   R     - Finger radius (r)
+#   DIST  - Distance from center: abs(IDX - X)
+#   PREV  - Previous value of the field
+#   SHAPE - Evaluated radial shape value [0..1]
+#   ROW   - Current iteration (in row formula)
+#   TEMPORAL - Evaluated row formula value
+#
+# Math functions available: exp, sin, cos, sqrt, abs, min, max, pi
 
 saurons_finger:
-  # Example: Increase sensitivity at index 1000 ± 100 neurons, iterations 200-300
-  # - name: "sensitivity_boost"
-  #   center_idx: 1000
-  #   radius: 100
-  #   shape: "gaussian"
-  #   pressure: 50
-  #   parameter: "elastic_trigger"
-  #   iter_start: 200
-  #   iter_end: 300
-
+  # Gaussian recharge boost at neuron 10000, iterations 400-600
   - name: "recharge_boost"
-    center_idx: 1000
-    radius: 100
-    shape: "gaussian"
-    pressure: 15
-    parameter: "elastic_recharge"
-    iter_start: 450
-    iter_end: 550
+    x: 19000
+    r: 500
+    field: "elastic_recharge"
+    formula: "PREV + 15 * SHAPE * TEMPORAL"
+    shape: "exp(-0.5 * ((DIST / (R / 2.5)) ** 2))"
+    rows:
+      - start: 400
+        end: 600
+        formula: "1.0"
 
+  # Gaussian trigger boost at neuron 12000, ramping up then down
   - name: "trigger_boost"
-    center_idx: 1200
-    radius: 200
-    shape: "gaussian"
-    pressure: -50
-    parameter: "elastic_trigger"
-    iter_start: 500
-    iter_end: 700
+    x: 19500
+    r: 600
+    field: "elastic_trigger"
+    formula: "PREV + 150 * SHAPE * TEMPORAL"
+    shape: "exp(-0.5 * ((DIST / (R / 2.5)) ** 2))"
+    rows:
+      - start: 400
+        end: 600
+        formula: "(ROW - 400) / 200"
+      - start: 600
+        end: 800
+        formula: "1.0 - (ROW - 600) / 200"

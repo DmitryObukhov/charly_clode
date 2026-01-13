@@ -1,6 +1,8 @@
-# Socio - Neuromorphic Simulation Framework
+# Charly - Neuromorphic Simulation Framework
 
-Charly neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality.
+**Version 0.1** - Elastic Control Proof of Concept
+
+Charly is a neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality. This version proves that **elastic control mechanisms (Sauron's Finger) can modulate the Cumulative Emotional State (CES)**.
 
 ## Quick Start
 
@@ -12,7 +14,7 @@ run.bat 10 results     # Run 10 days, output to results/
 ## Project Structure
 
 ```
-socio/
+charly/
 ├── run.bat             # Run the simulation
 ├── build.bat           # Rebuild sources using Claude Code
 ├── config/
@@ -68,22 +70,37 @@ The project uses a prompt-driven development approach:
 
 ## Checkpoints
 
-### Combined the Prompts
-Initial checkpoint consolidating specifications from original `main_prompt.txt` into modular prompt files.
+### v0.1 - Elastic Control Proof of Concept (Current)
+**Key Finding**: Elastic control via Sauron's Finger can modulate CES (Cumulative Emotional State).
+
+Features:
+- **Connectome Distribution**: Configurable link length distribution per neuron segment
+  - 3-band system: short/mid/long links with percentage allocation
+  - "Zebra" pattern support: alternating local (80-15-5) and distant (5-15-80) connectivity
+- **Sauron's Finger v2**: Formula-based dynamic substrate modification
+  - Executable formulas with macros: IDX, X, R, DIST, PREV, SHAPE, TEMPORAL, ROW
+  - Radial shape formulas (gaussian, custom)
+  - Temporal row windows with pressure distribution
+- **Actuator System**: Redesigned with EQ assignment and visualization
+  - Format: name, start, count, default_eq, color
+  - Actuator strip visualization with per-actuator colors
+  - TAIL_COUNT parameter for motor region
+- **Visualization Enhancements**:
+  - Unscaled ESP/ESN strip overlay
+  - Actuator output strip with configurable width
+  - White 1px separators between body/actuator/CES strips
+  - Dark grey background for head and actuator neurons
+
+### Population Coding & Visualization
+- **Population-coded inputs**: Eye sensor spreads luminosity across neurons using Stevens' power law
+- **Thermometer coding**: Low luminosity activates few neurons, high luminosity activates many
+- **CES waveform display**: ESP (light green) and ESN (red) as waveform dots with grid
+- **Inactive head neurons**: Displayed as dark grey in visualization
+- **Linear lamp movement**: Lamp moves left-to-right once per day
+- **Physical model visualization**: Generates `physical_*.png` showing agent/lamp positions
 
 ### Source Generation
 Generated implementation in `src/` based on prompt specifications.
 
-### Population Coding & Visualization Enhancements
-- **Population-coded inputs**: Eye sensor spreads luminosity across 50 neurons using Stevens' power law (psychophysical accuracy)
-- **Thermometer coding**: Low luminosity activates few neurons, high luminosity activates many
-- **CES waveform display**: 100px strip with dark green background, ESP (light green) and ESN (red) as waveform dots with grid
-- **Inactive head neurons**: Displayed as dark grey in visualization
-- **Linear lamp movement**: Lamp moves left-to-right once per day (1080 iterations)
-- **Physical model visualization**: Generates `physical_*.png` showing agent/lamp positions
-- **Output cleanup**: Automatically cleans output directory on restart
-- **Sauron's Finger**: Dynamic substrate modification system for pressing on neurons
-  - Configurable: center, radius, shape (gaussian/linear/flat/custom), pressure
-  - Time-bounded: iter_start, iter_end
-  - Parameters: elastic_trigger, elastic_recharge, charge, cumulative_signal
-- **Slower propagation tuning**: Adjusted charge dynamics for slower activity spread
+### Combined the Prompts
+Initial checkpoint consolidating specifications from original `main_prompt.txt` into modular prompt files.

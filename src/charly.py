@@ -239,9 +239,17 @@ class Charly:
             if signal and signal not in inputs:
                 self.log(f"Warning: Input signal '{signal}' not available in physical model")
 
-        for actuator_name in self.config.get('actuators', {}).keys():
-            if actuator_name not in outputs:
-                self.log(f"Warning: Actuator '{actuator_name}' not available in physical model")
+        actuator_configs = self.config.get('actuators', [])
+        if isinstance(actuator_configs, list):
+            for actuator_cfg in actuator_configs:
+                if actuator_cfg:
+                    name = actuator_cfg.get('name', '')
+                    if name and name not in outputs:
+                        self.log(f"Warning: Actuator '{name}' not available in physical model")
+        elif isinstance(actuator_configs, dict):
+            for actuator_name in actuator_configs.keys():
+                if actuator_name not in outputs:
+                    self.log(f"Warning: Actuator '{actuator_name}' not available in physical model")
 
     def _init_substrate(self) -> None:
         """Initialize the neural substrate with default values."""
@@ -271,28 +279,77 @@ class Charly:
         self._identify_stars()
 
     def _build_connectome(self) -> None:
-        """Build the connectome for all neurons."""
+        """Build the connectome for all neurons with configurable link distributions."""
         self.log("Building connectome...")
+
+        # Link length distribution parameters
+        short_range_pct = self.config.get('LINK_LEN_SHORT_RANGE', 10) / 100.0
+        long_range_pct = self.config.get('LINK_LEN_LONG_RANGE', 10) / 100.0
+        default_dist = self.config.get('LINK_DISTRIBUTION_DEFAULT', [80, 15, 5])
+
+        # Calculate distance thresholds
+        short_max = int(self.link_length_max * short_range_pct)
+        long_min = int(self.link_length_max * (1.0 - long_range_pct))
+
+        # Build distribution lookup from segments
+        dist_segments = self.config.get('connectome_distribution', [])
+
+        def get_distribution(neuron_idx: int) -> List[int]:
+            """Get [short%, mid%, long%] distribution for a neuron index."""
+            for seg in dist_segments:
+                if seg['start'] <= neuron_idx < seg['end']:
+                    return seg.get('distribution', default_dist)
+            return default_dist
 
         for dst_idx in range(self.head_count, self.neuron_count):
             n_links = self.rng.randint(self.links_min, self.links_max)
 
-            candidates = []
+            # Get distribution for this neuron
+            dist = get_distribution(dst_idx)
+            short_pct, mid_pct, long_pct = dist[0] / 100.0, dist[1] / 100.0, dist[2] / 100.0
+
+            # Categorize candidates by distance band
+            short_candidates = []  # 0 to short_max
+            mid_candidates = []    # short_max to long_min
+            long_candidates = []   # long_min to link_length_max
+
             for src_idx in range(self.neuron_count):
                 if src_idx == dst_idx:
                     continue
                 distance = abs(src_idx - dst_idx)
-                if distance <= self.link_length_max:
-                    candidates.append(src_idx)
+                if distance > self.link_length_max:
+                    continue
+                if distance <= short_max:
+                    short_candidates.append(src_idx)
+                elif distance >= long_min:
+                    long_candidates.append(src_idx)
+                else:
+                    mid_candidates.append(src_idx)
 
-            if len(candidates) > n_links:
-                selected = self.rng.sample(candidates, n_links)
-            else:
-                selected = candidates
+            # Calculate target count for each band
+            n_short = int(n_links * short_pct)
+            n_long = int(n_links * long_pct)
+            n_mid = n_links - n_short - n_long
+
+            # Select from each band (cap at available candidates)
+            selected = []
+
+            if short_candidates:
+                n_short_actual = min(n_short, len(short_candidates))
+                selected.extend(self.rng.sample(short_candidates, n_short_actual))
+
+            if mid_candidates:
+                n_mid_actual = min(n_mid, len(mid_candidates))
+                selected.extend(self.rng.sample(mid_candidates, n_mid_actual))
+
+            if long_candidates:
+                n_long_actual = min(n_long, len(long_candidates))
+                selected.extend(self.rng.sample(long_candidates, n_long_actual))
 
             if not selected:
                 continue
 
+            # Assign weights
             raw_weights = [self.rng.random() for _ in selected]
             total_raw = sum(raw_weights)
             if total_raw > 0:
@@ -385,11 +442,55 @@ class Charly:
         self.log(f"Configured {len(self.receptors)} receptor signals")
 
     def _configure_actuators(self) -> None:
-        """Configure output actuators from config."""
-        for actuator_name, neuron_indices in self.config.get('actuators', {}).items():
-            if isinstance(neuron_indices, list):
-                valid_indices = [idx for idx in neuron_indices if 0 <= idx < self.neuron_count]
-                self.actuators[actuator_name] = valid_indices
+        """Configure output actuators from config.
+
+        New format: list of {name, start, count, default_eq, color}
+        Each actuator gets neurons from start to start+count-1 with assigned EQ.
+        """
+        actuator_configs = self.config.get('actuators', [])
+
+        # Handle new list format
+        if isinstance(actuator_configs, list):
+            for actuator_cfg in actuator_configs:
+                if not actuator_cfg:
+                    continue
+
+                name = actuator_cfg.get('name', 'unnamed')
+                start = actuator_cfg.get('start', 0)
+                count = actuator_cfg.get('count', 10)
+                default_eq = actuator_cfg.get('default_eq', 0)
+                color = tuple(actuator_cfg.get('color', [255, 255, 255]))
+
+                # Build list of neuron indices
+                indices = []
+                for i in range(count):
+                    idx = start + i
+                    if 0 <= idx < self.neuron_count:
+                        indices.append(idx)
+                        # Assign EQ to the neuron
+                        self.current[idx].eq = default_eq
+                        self.current[idx].name = f"{name}_{i}"
+                        self.next[idx].eq = default_eq
+                        self.next[idx].name = f"{name}_{i}"
+
+                self.actuators[name] = {
+                    'indices': indices,
+                    'color': color,
+                    'start': start,
+                    'count': count
+                }
+
+        # Handle legacy dict format for backwards compatibility
+        elif isinstance(actuator_configs, dict):
+            for actuator_name, neuron_indices in actuator_configs.items():
+                if isinstance(neuron_indices, list):
+                    valid_indices = [idx for idx in neuron_indices if 0 <= idx < self.neuron_count]
+                    self.actuators[actuator_name] = {
+                        'indices': valid_indices,
+                        'color': (255, 255, 255),
+                        'start': valid_indices[0] if valid_indices else 0,
+                        'count': len(valid_indices)
+                    }
 
         self.log(f"Configured {len(self.actuators)} actuators")
 
@@ -452,109 +553,113 @@ class Charly:
             if not cfg:  # Skip empty/commented entries
                 continue
 
-            center_idx = cfg.get('center_idx', 0)
-            radius = cfg.get('radius', 10)
-            shape = cfg.get('shape', 'gaussian')
-            pressure = cfg.get('pressure', 0)
-            parameter = cfg.get('parameter', 'elastic_trigger')
-            iter_start = cfg.get('iter_start', 0)
-            iter_end = cfg.get('iter_end', self.day_steps)
-            shape_values = cfg.get('shape_values', None)
-
-            # Pre-calculate shape multipliers for the region
-            multipliers = self._calculate_finger_shape(radius, shape, shape_values)
-
             finger_press = {
-                'name': cfg.get('name', f'finger_{center_idx}'),
-                'center_idx': center_idx,
-                'radius': radius,
-                'pressure': pressure,
-                'parameter': parameter,
-                'iter_start': iter_start,
-                'iter_end': iter_end,
-                'multipliers': multipliers
+                'name': cfg.get('name', 'unnamed'),
+                'x': cfg.get('x', 0),
+                'r': cfg.get('r', 10),
+                'field': cfg.get('field', 'elastic_trigger'),
+                'formula': cfg.get('formula', 'PREV'),
+                'shape': cfg.get('shape', '1.0'),
+                'rows': cfg.get('rows', [])
             }
             self.finger_presses.append(finger_press)
 
         if self.finger_presses:
             self.log(f"Configured {len(self.finger_presses)} Sauron's Finger presses")
 
-    def _calculate_finger_shape(self, radius: int, shape: str,
-                                 custom_values: List[float] = None) -> List[float]:
+    def _eval_finger_formula(self, formula: str, context: Dict[str, float]) -> float:
         """
-        Calculate shape multipliers for finger press.
+        Safely evaluate a finger formula with the given context.
 
         Args:
-            radius: Number of neurons on each side of center
-            shape: Shape type ('gaussian', 'linear', 'flat', 'custom')
-            custom_values: Custom shape array for 'custom' shape
+            formula: Formula string to evaluate
+            context: Dictionary of variable names to values (IDX, X, R, DIST, PREV, etc.)
 
         Returns:
-            List of multipliers [0..1] of length 2*radius+1
+            Evaluated result as float
         """
-        width = 2 * radius + 1
+        # Safe math functions
+        safe_dict = {
+            'exp': math.exp,
+            'sin': math.sin,
+            'cos': math.cos,
+            'sqrt': math.sqrt,
+            'abs': abs,
+            'min': min,
+            'max': max,
+            'pi': math.pi,
+            'e': math.e,
+        }
+        # Add context variables
+        safe_dict.update(context)
 
-        if shape == 'custom' and custom_values:
-            # Use custom values, pad or truncate to fit
-            if len(custom_values) >= width:
-                return custom_values[:width]
-            else:
-                # Pad with zeros
-                padding = width - len(custom_values)
-                left_pad = padding // 2
-                right_pad = padding - left_pad
-                return [0.0] * left_pad + custom_values + [0.0] * right_pad
-
-        elif shape == 'flat':
-            # Uniform pressure across region
-            return [1.0] * width
-
-        elif shape == 'linear':
-            # Linear falloff from center
-            multipliers = []
-            for i in range(width):
-                distance = abs(i - radius)
-                multipliers.append(1.0 - distance / (radius + 1))
-            return multipliers
-
-        else:  # gaussian (default)
-            # Gaussian falloff from center
-            sigma = radius / 2.5  # 2.5 sigma covers most of the radius
-            multipliers = []
-            for i in range(width):
-                distance = abs(i - radius)
-                multipliers.append(math.exp(-0.5 * (distance / sigma) ** 2))
-            return multipliers
+        try:
+            return float(eval(formula, {"__builtins__": {}}, safe_dict))
+        except Exception:
+            return 0.0
 
     def _apply_saurons_finger(self) -> None:
-        """Apply active finger presses to the substrate."""
+        """Apply active finger presses to the substrate using formula evaluation."""
         for finger in self.finger_presses:
-            # Check if finger is active at current iteration
-            if not (finger['iter_start'] <= self.iteration <= finger['iter_end']):
+            x = finger['x']
+            r = finger['r']
+            field = finger['field']
+            formula = finger['formula']
+            shape_formula = finger['shape']
+            rows = finger['rows']
+
+            # Check if any row is active at current iteration
+            temporal = 0.0
+            for row in rows:
+                start = row.get('start', 0)
+                end = row.get('end', self.day_steps)
+                if start <= self.iteration <= end:
+                    row_formula = row.get('formula', '1.0')
+                    temporal = self._eval_finger_formula(row_formula, {'ROW': self.iteration})
+                    break
+
+            if temporal == 0.0:
                 continue
 
-            center = finger['center_idx']
-            radius = finger['radius']
-            pressure = finger['pressure']
-            parameter = finger['parameter']
-            multipliers = finger['multipliers']
+            # Apply to neurons in range [x-r, x+r]
+            for idx in range(max(0, x - r), min(self.neuron_count, x + r + 1)):
+                neuron = self.current[idx]
+                dist = abs(idx - x)
 
-            # Apply pressure to neurons in range
-            for i, mult in enumerate(multipliers):
-                idx = center - radius + i
-                if 0 <= idx < self.neuron_count:
-                    delta = pressure * mult
-                    neuron = self.current[idx]
+                # Get previous field value
+                prev = getattr(neuron, field, 0.0)
 
-                    # Apply to the specified parameter
-                    if parameter == 'elastic_trigger':
-                        neuron.elastic_trigger += delta
-                    elif parameter == 'elastic_recharge':
-                        neuron.elastic_recharge += delta
-                    elif parameter == 'charge':
-                        neuron.charge += delta
-                    elif parameter == 'cumulative_signal':
-                        neuron.cumulative_signal += delta
+                # Evaluate shape formula
+                shape_context = {
+                    'IDX': idx,
+                    'X': x,
+                    'R': r,
+                    'DIST': dist,
+                    'PREV': prev,
+                }
+                shape_value = self._eval_finger_formula(shape_formula, shape_context)
+
+                # Evaluate main formula
+                main_context = {
+                    'IDX': idx,
+                    'X': x,
+                    'R': r,
+                    'DIST': dist,
+                    'PREV': prev,
+                    'SHAPE': shape_value,
+                    'TEMPORAL': temporal,
+                }
+                new_value = self._eval_finger_formula(formula, main_context)
+
+                # Apply to the specified field
+                if field == 'elastic_trigger':
+                    neuron.elastic_trigger = new_value
+                elif field == 'elastic_recharge':
+                    neuron.elastic_recharge = new_value
+                elif field == 'charge':
+                    neuron.charge = new_value
+                elif field == 'cumulative_signal':
+                    neuron.cumulative_signal = new_value
 
     def _process_inputs(self) -> None:
         """Process sensory inputs and activate receptor neurons.
@@ -616,13 +721,14 @@ class Charly:
         """Calculate actuator output values based on neuron activity."""
         outputs = {}
 
-        for actuator_name, neuron_indices in self.actuators.items():
-            if not neuron_indices:
+        for actuator_name, actuator_cfg in self.actuators.items():
+            indices = actuator_cfg.get('indices', [])
+            if not indices:
                 outputs[actuator_name] = 0.0
                 continue
 
-            active_count = sum(1 for idx in neuron_indices if self.current[idx].active)
-            outputs[actuator_name] = active_count / len(neuron_indices)
+            active_count = sum(1 for idx in indices if self.current[idx].active)
+            outputs[actuator_name] = active_count / len(indices)
 
         return outputs
 
@@ -796,23 +902,34 @@ class Charly:
     def visualize(self,
                   width: Optional[int] = None,
                   height: Optional[int] = None,
-                  ces_strip_width: int = 0) -> Image.Image:
-        """Create visualization of the day's neural activity."""
+                  ces_strip_width: int = 0,
+                  actuator_strip_width: int = 0) -> Image.Image:
+        """Create visualization of the day's neural activity.
+
+        The neural diagram is scaled to fit width/height, while the CES and
+        actuator strips are rendered at their configured widths without scaling.
+        """
         if not self.day_history:
             self.log("No history to visualize")
             return Image.new('RGB', (width or 100, height or 100), self.bg_color)
 
-        w_raw = self.neuron_count + ces_strip_width
         h_raw = len(self.day_history)
+        # Account for 1px separators: one before actuator (if present), one before CES (if both present)
+        n_separators = 0
+        if actuator_strip_width > 0:
+            n_separators += 1  # separator before actuator
+        if ces_strip_width > 0 and actuator_strip_width > 0:
+            n_separators += 1  # separator before CES (only if actuator also present)
+        total_strip_width = ces_strip_width + actuator_strip_width + n_separators
 
-        img_array = np.zeros((h_raw, w_raw, 3), dtype=np.uint8)
-        img_array[:, :] = self.bg_color
+        # Collect actuator neuron indices for special rendering
+        actuator_indices = set()
+        for actuator_cfg in self.actuators.values():
+            actuator_indices.update(actuator_cfg.get('indices', []))
 
-        if ces_strip_width > 0:
-            esps = [rec['esp'] for rec in self.day_history]
-            esns = [abs(rec['esn']) for rec in self.day_history]
-            max_esp = max(esps) if esps else 1
-            max_esn = max(esns) if esns else 1
+        # Create neural activity image (without strips)
+        neural_array = np.zeros((h_raw, self.neuron_count, 3), dtype=np.uint8)
+        neural_array[:, :] = self.bg_color
 
         for y, step_record in enumerate(self.day_history):
             neurons = step_record.get('neurons', [])
@@ -831,56 +948,145 @@ class Charly:
                     else:
                         color = tuple(int(c * brightness) for c in self.neg_color)
 
-                    img_array[y, x] = color
+                    neural_array[y, x] = color
                 elif x < self.head_count:
                     # Show inactive head neurons as dark grey
-                    img_array[y, x] = self.head_inactive_color
+                    neural_array[y, x] = self.head_inactive_color
+                elif x in actuator_indices:
+                    # Show inactive actuator neurons as dark grey (like head)
+                    neural_array[y, x] = self.head_inactive_color
 
-            if ces_strip_width > 0:
+        neural_image = Image.fromarray(neural_array, 'RGB')
+
+        # Scale neural image if dimensions specified
+        if width is not None or height is not None:
+            # Account for both strips when calculating neural diagram width
+            target_width = (width or neural_image.width) - total_strip_width
+            target_height = height or neural_image.height
+            neural_image = neural_image.resize((target_width, target_height), Image.Resampling.NEAREST)
+
+        # If no strips, return scaled neural image
+        if total_strip_width <= 0:
+            return neural_image
+
+        # Create CES strip
+        ces_image = None
+        if ces_strip_width > 0:
+            esps = [rec['esp'] for rec in self.day_history]
+            esns = [abs(rec['esn']) for rec in self.day_history]
+            max_esp = max(esps) if esps else 1
+            max_esn = max(esns) if esns else 1
+
+            ces_array = np.zeros((h_raw, ces_strip_width, 3), dtype=np.uint8)
+            ces_array[:, :] = self.ces_bg_color
+
+            for y, step_record in enumerate(self.day_history):
                 esp = step_record['esp']
                 esn = abs(step_record['esn'])
 
                 esp_normalized = esp / max_esp if max_esp > 0 else 0
                 esn_normalized = esn / max_esn if max_esn > 0 else 0
 
-                strip_start = self.neuron_count
-
-                # Fill CES strip with dark green background
-                img_array[y, strip_start:strip_start + ces_strip_width] = self.ces_bg_color
-
                 # Draw grid lines (vertical lines at regular intervals)
                 for gx in range(0, ces_strip_width, self.ces_grid_spacing):
-                    img_array[y, strip_start + gx] = self.ces_grid_color
+                    ces_array[y, gx] = self.ces_grid_color
 
                 # Draw ESP as light green dot (position indicates value)
-                # ESP maps to left half of strip (0 = left edge, max = center)
                 half_width = ces_strip_width // 2
                 esp_x = int(esp_normalized * (half_width - 1))
-                img_array[y, strip_start + esp_x] = self.ces_esp_color
+                ces_array[y, esp_x] = self.ces_esp_color
 
                 # Draw ESN as red dot (position indicates value)
-                # ESN maps to right half of strip (0 = center, max = right edge)
                 esn_x = half_width + int(esn_normalized * (half_width - 1))
-                img_array[y, strip_start + esn_x] = self.ces_esn_color
+                ces_array[y, esn_x] = self.ces_esn_color
 
-        raw_image = Image.fromarray(img_array, 'RGB')
+            ces_image = Image.fromarray(ces_array, 'RGB')
+            if ces_image.height != neural_image.height:
+                ces_image = ces_image.resize((ces_strip_width, neural_image.height), Image.Resampling.NEAREST)
 
-        if width is not None or height is not None:
-            target_width = width or raw_image.width
-            target_height = height or raw_image.height
-            raw_image = raw_image.resize((target_width, target_height), Image.Resampling.NEAREST)
+        # Create actuator strip
+        actuator_image = None
+        if actuator_strip_width > 0 and self.actuators:
+            actuator_array = np.zeros((h_raw, actuator_strip_width, 3), dtype=np.uint8)
+            actuator_array[:, :] = self.ces_bg_color  # Same background as CES
 
-        return raw_image
+            # Calculate max output for normalization
+            actuator_names = list(self.actuators.keys())
+            max_outputs = {}
+            for name in actuator_names:
+                outputs = [rec['outputs'].get(name, 0.0) for rec in self.day_history]
+                max_outputs[name] = max(outputs) if outputs else 1.0
+
+            # Divide strip width among actuators
+            n_actuators = len(actuator_names)
+            strip_per_actuator = actuator_strip_width // max(n_actuators, 1)
+
+            for y, step_record in enumerate(self.day_history):
+                outputs = step_record.get('outputs', {})
+
+                # Draw grid lines
+                for gx in range(0, actuator_strip_width, self.ces_grid_spacing):
+                    actuator_array[y, gx] = self.ces_grid_color
+
+                # Draw each actuator's output
+                for i, name in enumerate(actuator_names):
+                    actuator_cfg = self.actuators[name]
+                    color = actuator_cfg.get('color', (255, 255, 255))
+                    output_val = outputs.get(name, 0.0)
+                    max_val = max_outputs.get(name, 1.0)
+
+                    normalized = output_val / max_val if max_val > 0 else 0
+
+                    # Position within this actuator's portion of the strip
+                    strip_start = i * strip_per_actuator
+                    x_pos = strip_start + int(normalized * (strip_per_actuator - 1))
+                    if 0 <= x_pos < actuator_strip_width:
+                        actuator_array[y, x_pos] = color
+
+            actuator_image = Image.fromarray(actuator_array, 'RGB')
+            if actuator_image.height != neural_image.height:
+                actuator_image = actuator_image.resize((actuator_strip_width, neural_image.height), Image.Resampling.NEAREST)
+
+        # Combine: neural diagram + separator + actuator strip + separator + CES strip
+        final_width = neural_image.width + total_strip_width
+        final_image = Image.new('RGB', (final_width, neural_image.height), self.bg_color)
+        final_image.paste(neural_image, (0, 0))
+
+        x_offset = neural_image.width
+        separator_color = (255, 255, 255)  # White separator
+
+        if actuator_image:
+            # Draw 1px white separator before actuator strip
+            for y in range(neural_image.height):
+                final_image.putpixel((x_offset, y), separator_color)
+            x_offset += 1
+            final_image.paste(actuator_image, (x_offset, 0))
+            x_offset += actuator_strip_width
+
+        if ces_image:
+            # Draw 1px white separator before CES strip
+            if actuator_image:
+                for y in range(neural_image.height):
+                    final_image.putpixel((x_offset, y), separator_color)
+                x_offset += 1
+            final_image.paste(ces_image, (x_offset, 0))
+
+        return final_image
 
     def save_visualization(self,
                           filename: str,
                           width: Optional[int] = None,
                           height: Optional[int] = None,
-                          ces_strip_width: Optional[int] = None) -> str:
+                          ces_strip_width: Optional[int] = None,
+                          actuator_strip_width: Optional[int] = None) -> str:
         """Save visualization to a PNG file."""
         if ces_strip_width is None:
             ces_strip_width = self.config.get('CES_STRIP_WIDTH', 100)
-        img = self.visualize(width, height, ces_strip_width=ces_strip_width)
+        if actuator_strip_width is None:
+            actuator_strip_width = self.config.get('ACTUATOR_STRIP_WIDTH', 100)
+        img = self.visualize(width, height,
+                            ces_strip_width=ces_strip_width,
+                            actuator_strip_width=actuator_strip_width)
         os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else '.', exist_ok=True)
         img.save(filename, 'PNG')
         self.log(f"Visualization saved to {filename}")
