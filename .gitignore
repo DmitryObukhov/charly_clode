@@ -1,5 +1,9 @@
 src/__pycache__/*
 src/output/*
+src/__pycache__/*
+src/*.pyc
+src/.DS_Store
 output/*
+__pycache__/*
 *.pyc
 .DS_Store

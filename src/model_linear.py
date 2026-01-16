@@ -39,6 +39,7 @@ class Linear(PhysicalModel):
     Actuators:
         left: Left flagella activation [0, 1] - pushes agent RIGHT
         right: Right flagella activation [0, 1] - pushes agent LEFT
+        motor: Single motor [0, 1] - 0=full left, 0.5=stop, 1=full right
     """
 
     # Physical constants
@@ -122,17 +123,24 @@ class Linear(PhysicalModel):
         Apply actuator values and advance simulation.
 
         Left flagella pushes agent right, right flagella pushes left.
-        Movement = (left - right) * FLAGELLA_STRENGTH
+        Motor: 0=full left, 0.5=stop, 1=full right
 
         Args:
-            actuators: Dictionary with 'left' and 'right' activation [0, 1]
+            actuators: Dictionary with 'left', 'right', and/or 'motor' activation [0, 1]
         """
         # Get and clamp actuator values
         left_activation = max(0.0, min(1.0, actuators.get('left', 0.0)))
         right_activation = max(0.0, min(1.0, actuators.get('right', 0.0)))
+        motor_activation = actuators.get('motor', None)
 
-        # Calculate movement (left pushes right, right pushes left)
+        # Calculate movement from left/right flagella
         movement = (left_activation - right_activation) * self.FLAGELLA_STRENGTH
+
+        # Add motor contribution if present (0=left, 0.5=stop, 1=right)
+        if motor_activation is not None:
+            motor_activation = max(0.0, min(1.0, motor_activation))
+            motor_movement = (motor_activation - 0.5) * 2 * self.FLAGELLA_STRENGTH
+            movement += motor_movement
 
         # Update agent position with boundary clamping
         new_pos = self.agent_pos + movement
@@ -176,7 +184,7 @@ class Linear(PhysicalModel):
         Returns:
             Tuple of (sensor_names, actuator_names)
         """
-        return (['eye', 'agent_pos', 'lamp_pos'], ['left', 'right'])
+        return (['eye', 'agent_pos', 'lamp_pos'], ['left', 'right', 'motor'])
 
     def reset(self) -> None:
         """Reset model to initial state."""

@@ -7,7 +7,18 @@
       "Bash(git commit:*)",
       "Bash(ls:*)",
       "Bash(python src/main.py:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" status)",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" diff --stat README.md config/config.yaml src/charly.py)",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" add README.md config/config.yaml src/charly.py)",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" log -3 --oneline)",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" commit -m \"$\\(cat <<''EOF''\nv0.1: Elastic Control Proof of Concept\n\nProved that elastic control via Sauron''s Finger can modulate CES.\n\nFeatures:\n- Connectome distribution: configurable link length bands \\(short/mid/long\\)\n- Zebra pattern: alternating local/distant connectivity segments\n- Sauron''s Finger v2: formula-based with macros \\(IDX, DIST, PREV, SHAPE, TEMPORAL\\)\n- Actuator system: name, start, count, default_eq, color format\n- TAIL_COUNT parameter for motor region\n- Actuator strip visualization with per-actuator colors\n- Unscaled ESP/ESN strip overlay\n- White 1px separators between visualization strips\n- Dark grey background for head and actuator neurons\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" tag -a v0.1 -m \"Version 0.1: Elastic Control Proof of Concept - Proved that elastic control via Sauron''s Finger can modulate CES\")",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" log -1 --oneline)",
+      "Bash(git -C \"C:\\\\PROJECT_42\\\\charly\" tag -l)",
+      "Bash(timeout 5 python:*)",
+      "Bash(taskkill:*)",
+      "Bash(pkill:*)"
     ]
   }
 }

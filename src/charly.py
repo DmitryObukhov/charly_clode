@@ -192,6 +192,10 @@ class Charly:
         self.ces_grid_color = tuple(config.get('CES_GRID_COLOR', [40, 40, 40]))
         self.ces_grid_spacing = config.get('CES_GRID_SPACING', 10)
 
+        # Physical strip visualization
+        self.physical_agent_color = tuple(config.get('PHYSICAL_AGENT_COLOR', [0, 100, 255]))
+        self.physical_lamp_color = tuple(config.get('PHYSICAL_LAMP_COLOR', [255, 100, 0]))
+
         # Initialize random generator
         self.rng = random.Random(self.seed)
 
@@ -472,6 +476,24 @@ class Charly:
                         self.current[idx].name = f"{name}_{i}"
                         self.next[idx].eq = default_eq
                         self.next[idx].name = f"{name}_{i}"
+
+                # Wire input connections if specified (adds to existing connections)
+                input_cfg = actuator_cfg.get('inputs', None)
+                if input_cfg:
+                    input_start = input_cfg.get('start', 0)
+                    input_count = input_cfg.get('count', 100)
+                    weight = input_cfg.get('weight', 100)
+
+                    # Add inputs from source range to motor neurons
+                    n_connections = 0
+                    for dst_idx in indices:
+                        for src_offset in range(input_count):
+                            src_idx = input_start + src_offset
+                            if 0 <= src_idx < self.neuron_count and src_idx != dst_idx:
+                                self.connectome.add(src_idx, dst_idx, weight)
+                                n_connections += 1
+
+                    self.log(f"Wired {name}: {n_connections} connections from body")
 
                 self.actuators[name] = {
                     'indices': indices,
@@ -812,6 +834,9 @@ class Charly:
 
         sensor_names = list(self.receptors.keys())
         sensor_values = self.physical_model.get(sensor_names) if sensor_names else {}
+        # Also get physical state for visualization
+        physical_state = self.physical_model.get(['agent_pos', 'lamp_pos'])
+        sensor_values.update(physical_state)
 
         for i in range(self.neuron_count):
             self.next[i] = self.current[i].clone()
@@ -903,24 +928,27 @@ class Charly:
                   width: Optional[int] = None,
                   height: Optional[int] = None,
                   ces_strip_width: int = 0,
-                  actuator_strip_width: int = 0) -> Image.Image:
+                  actuator_strip_width: int = 0,
+                  physical_strip_width: int = 0) -> Image.Image:
         """Create visualization of the day's neural activity.
 
-        The neural diagram is scaled to fit width/height, while the CES and
-        actuator strips are rendered at their configured widths without scaling.
+        The neural diagram is scaled to fit width/height, while the CES,
+        actuator, and physical strips are rendered at their configured widths.
         """
         if not self.day_history:
             self.log("No history to visualize")
             return Image.new('RGB', (width or 100, height or 100), self.bg_color)
 
         h_raw = len(self.day_history)
-        # Account for 1px separators: one before actuator (if present), one before CES (if both present)
+        # Count separators between strips
         n_separators = 0
         if actuator_strip_width > 0:
-            n_separators += 1  # separator before actuator
-        if ces_strip_width > 0 and actuator_strip_width > 0:
-            n_separators += 1  # separator before CES (only if actuator also present)
-        total_strip_width = ces_strip_width + actuator_strip_width + n_separators
+            n_separators += 1
+        if physical_strip_width > 0:
+            n_separators += 1
+        if ces_strip_width > 0:
+            n_separators += 1
+        total_strip_width = ces_strip_width + actuator_strip_width + physical_strip_width + n_separators
 
         # Collect actuator neuron indices for special rendering
         actuator_indices = set()
@@ -1047,7 +1075,36 @@ class Charly:
             if actuator_image.height != neural_image.height:
                 actuator_image = actuator_image.resize((actuator_strip_width, neural_image.height), Image.Resampling.NEAREST)
 
-        # Combine: neural diagram + separator + actuator strip + separator + CES strip
+        # Create physical strip (agent and lamp positions)
+        physical_image = None
+        if physical_strip_width > 0:
+            physical_array = np.zeros((h_raw, physical_strip_width, 3), dtype=np.uint8)
+            physical_array[:, :] = self.ces_bg_color
+
+            for y, step_record in enumerate(self.day_history):
+                inputs = step_record.get('inputs', {})
+                agent_pos = inputs.get('agent_pos', 0.5)
+                lamp_pos = inputs.get('lamp_pos', 0.5)
+
+                # Draw grid lines
+                for gx in range(0, physical_strip_width, self.ces_grid_spacing):
+                    physical_array[y, gx] = self.ces_grid_color
+
+                # Draw agent position (blue) - proportionally mapped
+                agent_x = int(agent_pos * (physical_strip_width - 1))
+                agent_x = max(0, min(physical_strip_width - 1, agent_x))
+                physical_array[y, agent_x] = self.physical_agent_color
+
+                # Draw lamp position (orange) - proportionally mapped
+                lamp_x = int(lamp_pos * (physical_strip_width - 1))
+                lamp_x = max(0, min(physical_strip_width - 1, lamp_x))
+                physical_array[y, lamp_x] = self.physical_lamp_color
+
+            physical_image = Image.fromarray(physical_array, 'RGB')
+            if physical_image.height != neural_image.height:
+                physical_image = physical_image.resize((physical_strip_width, neural_image.height), Image.Resampling.NEAREST)
+
+        # Combine: neural + separator + actuator + separator + physical + separator + CES
         final_width = neural_image.width + total_strip_width
         final_image = Image.new('RGB', (final_width, neural_image.height), self.bg_color)
         final_image.paste(neural_image, (0, 0))
@@ -1063,12 +1120,19 @@ class Charly:
             final_image.paste(actuator_image, (x_offset, 0))
             x_offset += actuator_strip_width
 
+        if physical_image:
+            # Draw 1px white separator before physical strip
+            for y in range(neural_image.height):
+                final_image.putpixel((x_offset, y), separator_color)
+            x_offset += 1
+            final_image.paste(physical_image, (x_offset, 0))
+            x_offset += physical_strip_width
+
         if ces_image:
             # Draw 1px white separator before CES strip
-            if actuator_image:
-                for y in range(neural_image.height):
-                    final_image.putpixel((x_offset, y), separator_color)
-                x_offset += 1
+            for y in range(neural_image.height):
+                final_image.putpixel((x_offset, y), separator_color)
+            x_offset += 1
             final_image.paste(ces_image, (x_offset, 0))
 
         return final_image
@@ -1078,15 +1142,19 @@ class Charly:
                           width: Optional[int] = None,
                           height: Optional[int] = None,
                           ces_strip_width: Optional[int] = None,
-                          actuator_strip_width: Optional[int] = None) -> str:
+                          actuator_strip_width: Optional[int] = None,
+                          physical_strip_width: Optional[int] = None) -> str:
         """Save visualization to a PNG file."""
         if ces_strip_width is None:
             ces_strip_width = self.config.get('CES_STRIP_WIDTH', 100)
         if actuator_strip_width is None:
             actuator_strip_width = self.config.get('ACTUATOR_STRIP_WIDTH', 100)
+        if physical_strip_width is None:
+            physical_strip_width = self.config.get('PHYSICAL_STRIP_WIDTH', 100)
         img = self.visualize(width, height,
                             ces_strip_width=ces_strip_width,
-                            actuator_strip_width=actuator_strip_width)
+                            actuator_strip_width=actuator_strip_width,
+                            physical_strip_width=physical_strip_width)
         os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else '.', exist_ok=True)
         img.save(filename, 'PNG')
         self.log(f"Visualization saved to {filename}")
