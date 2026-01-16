@@ -1,6 +1,6 @@
 # Charly - Neuromorphic Simulation Framework
 
-**Version 0.2** - Live Visualization
+**Version 0.3** - Orgasm/Terror Physical Model
 
 Charly is a neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality.
 
@@ -75,7 +75,25 @@ The project uses a prompt-driven development approach:
 
 ## Checkpoints
 
-### v0.2 - Live Visualization (Current)
+### v0.3 - Orgasm/Terror Physical Model (Current)
+New physical model where agent tracks a moving lamp with pleasure/pain feedback.
+
+Features:
+- **Lamp Movement**: Configurable sine, linear, or file-based (e.g., stock prices)
+- **Orgasm Signal**: Reward when agent matches lamp position (within tolerance)
+- **Terror Signals**: Punishment for deviation (terror_up/terror_down)
+- **Smoothness Control**: Response curve shape (0%=binary, 50%=sigmoid, 100%=linear)
+- **New Actuators**: move_up/move_down for agent control
+
+Neuron Layout (5000):
+- Head 0-99: Reserved
+- Head 100-399: Terror Up (agent above lamp)
+- Head 400-699: Terror Down (agent below lamp)
+- Head 700-999: Orgasm (matching lamp)
+- Tail 4000-4399: Move Up actuator
+- Tail 4500-4899: Move Down actuator
+
+### v0.2 - Live Visualization
 Real-time monitoring of neural activity with scrolling display.
 
 Features:

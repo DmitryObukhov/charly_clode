@@ -10,240 +10,240 @@ SEED: 42
 
 # Neuron counts
 NEURON_COUNT: 5000           # Total neurons in substrate
-HEAD_COUNT: 500              # Sensory/innate region (indices 0 to HEAD_COUNT-1)
-TAIL_COUNT: 4500             # Motor/output region start index
+HEAD_COUNT: 1000             # Sensory region (indices 0 to HEAD_COUNT-1)
+TAIL_COUNT: 4000             # Motor/output region start index
 
-# Charge dynamics (tuned for slower propagation)
+# Charge dynamics
 CHARGE_MIN: 100             # Minimum charge required for neuron to fire
-RECHARGE_RATE: 20            # Base charge accumulation per iteration
+RECHARGE_RATE: 20           # Base charge accumulation per iteration
 NORMAL_TRIGGER: 100         # Threshold for cumulative signal activation
 DEFAULT_CUMULATIVE_INPUT: 2000  # Total synapse weight per neuron
 
 # Elastic parameters
-ELASTIC_TRIGGER_PROPAGATION: 0.75    # Elastic trigger preserved with active input
-ELASTIC_TRIGGER_DEGRADATION: 1       # Decay per iteration without input
-ELASTIC_RECHARGE_PROPAGATION: 0.75   # Elastic recharge preserved
-ELASTIC_RECHARGE_DEGRADATION: 1      # Decay per iteration
+ELASTIC_TRIGGER_PROPAGATION: 0.75
+ELASTIC_TRIGGER_DEGRADATION: 1
+ELASTIC_RECHARGE_PROPAGATION: 0.75
+ELASTIC_RECHARGE_DEGRADATION: 1
 
 # Emotional Quantum (EQ)
-EQ_MAX: 255                 # Maximum absolute EQ value
+EQ_MAX: 1000                # Maximum absolute EQ value
 DEFAULT_MIN_EQ: -3          # Random initialization minimum
 DEFAULT_MAX_EQ: 3           # Random initialization maximum
-STAR_LEVEL: 20              # Minimum |EQ| for star classification
+STAR_LEVEL: 50              # Minimum |EQ| for star classification
 
 # Connectome generation
-LINKS_PER_NEURON_MIN: 30     # Minimum synapses per neuron
-LINKS_PER_NEURON_MAX: 200   # Maximum synapses per neuron
-LINK_LENGTH_MAX: 350        # Maximum index distance for connections
+LINKS_PER_NEURON_MIN: 30
+LINKS_PER_NEURON_MAX: 200
+LINK_LENGTH_MAX: 500
 
-# Link length distribution bands (percent of LINK_LENGTH_MAX)
-LINK_LEN_SHORT_RANGE: 10    # Short links: 0% to 10% of max (0-35 for max=350)
-LINK_LEN_LONG_RANGE: 10     # Long links: 90% to 100% of max (315-350 for max=350)
-                            # Mid links: 10% to 90% of max (35-315 for max=350)
-
-# Default distribution [short%, mid%, long%] - must sum to 100
+# Link length distribution bands
+LINK_LEN_SHORT_RANGE: 10
+LINK_LEN_LONG_RANGE: 10
 LINK_DISTRIBUTION_DEFAULT: [80, 15, 5]
 
 # =============================================================================
 # Connectome Distribution Segments
 # =============================================================================
-# Define link length distribution by neuron ranges.
-# Each segment specifies: start, end, distribution [short%, mid%, long%]
-# Neurons not covered use LINK_DISTRIBUTION_DEFAULT.
-#
-# "Zebra" pattern: alternating local (80-15-5) and distant (5-15-80) connectivity
 
 connectome_distribution:
-  # Segment 1: neurons 500-1500 - local connectivity
-  - start: 500
-    end: 1500
+  # Head region - local connectivity
+  - start: 1000
+    end: 2000
     distribution: [90, 5, 5]
 
-  # Segment 2: neurons 1500-2500 - distant connectivity
-  - start: 1500
-    end: 2500
-    distribution: [1, 1, 98]
+  # Mid body - distant connectivity for integration
+  - start: 2000
+    end: 3000
+    distribution: [10, 10, 80]
 
-  # Segment 3: neurons 2500-5000 - local connectivity
-  - start: 2500
+  # Pre-tail - local connectivity
+  - start: 3000
     end: 5000
-    distribution: [98, 2, 0]
-
-
+    distribution: [95, 4, 1]
 
 # History
-HISTORY_MAXLEN: 256         # Maximum neuron activation history length
+HISTORY_MAXLEN: 256
 
 # Timing
-DAY_STEPS: 20000            # Iterations per day phase
+DAY_STEPS: 20000
 
 # =============================================================================
 # Physical Model Parameters
 # =============================================================================
 
-WORLD_SIZE: 1920            # Size of 1D world in pixels
+WORLD_SIZE: 1000            # Size of 1D world (normalized to 0-1 for display)
+
+# Lamp Movement
+LAMP_MODE: "sine"           # "sine", "linear", or "file"
+LAMP_AMPLITUDE: 0.4         # Amplitude as fraction of world (0.4 = 40% swing)
+LAMP_PERIOD: 4000           # Period in steps (full cycle)
+LAMP_CENTER: 0.5            # Center position (normalized 0-1)
+LAMP_FILE: ""               # CSV file path for "file" mode
+
+# Agent Movement
+AGENT_SPEED: 0.001          # Max movement per step (fraction of world)
+AGENT_START: 0.5            # Starting position (normalized 0-1)
+
+# =============================================================================
+# Sensory Input Configuration
+# =============================================================================
+
+# Orgasm zone - reward for matching lamp position
+ORGASM_TOLERANCE: 0.10      # 10% tolerance for "hit" (fraction of world)
+ORGASM_MAX_EQ: 800          # Maximum positive EQ for orgasm neurons
+ORGASM_MIN_EQ: 50           # Minimum positive EQ (at edge of tolerance)
+
+# Terror zones - punishment for deviation
+TERROR_MAX_EQ: -600         # Maximum negative EQ for terror neurons
+TERROR_MIN_EQ: -20          # Minimum negative EQ (at start of deviation)
+TERROR_RANGE: 0.5           # Range where terror is felt (fraction of world)
+TERROR_SMOOTHNESS: 50       # Response curve: 0%=binary step, 50%=sigmoid, 100%=linear
+
+# Orgasm response curve
+ORGASM_SMOOTHNESS: 50       # Response curve: 0%=binary step, 50%=sigmoid, 100%=linear
+
+# =============================================================================
+# Head Neuron Layout (0-999)
+# =============================================================================
+# 0-99:     Reserved
+# 100-399:  Terror Up (agent above lamp)
+# 400-699:  Terror Down (agent below lamp)
+# 700-999:  Orgasm (agent matches lamp)
+
+HEAD_RESERVE: 100           # Reserved neurons at start
+TERROR_UP_START: 100        # Terror up zone start
+TERROR_UP_COUNT: 300        # Terror up neuron count
+TERROR_DOWN_START: 400      # Terror down zone start
+TERROR_DOWN_COUNT: 300      # Terror down neuron count
+ORGASM_START: 700           # Orgasm zone start
+ORGASM_COUNT: 300           # Orgasm neuron count
+
+# =============================================================================
+# Tail Actuator Layout (4000-4999)
+# =============================================================================
+# 4000-4399: Move Up actuator (400 neurons)
+# 4500-4899: Move Down actuator (400 neurons)
+
+ACTUATOR_UP_START: 4000
+ACTUATOR_UP_COUNT: 400
+ACTUATOR_DOWN_START: 4500
+ACTUATOR_DOWN_COUNT: 400
+ACTUATOR_EQ: 30             # Positive EQ for actuator neurons
 
 # =============================================================================
 # Visualization Parameters
 # =============================================================================
 
-NEURON_POSITIVE_COLOR: [0, 255, 0]    # Green for positive EQ
-NEURON_NEGATIVE_COLOR: [255, 0, 0]    # Red for negative EQ
-NEURON_BG_COLOR: [0, 0, 0]            # Black background
-HEAD_INACTIVE_COLOR: [14, 14, 14]     # Dark grey for inactive head neurons
+NEURON_POSITIVE_COLOR: [0, 255, 0]
+NEURON_NEGATIVE_COLOR: [255, 0, 0]
+NEURON_BG_COLOR: [0, 0, 0]
+HEAD_INACTIVE_COLOR: [14, 14, 14]
 
-VISUALIZATION_WIDTH: 1920             # Output image width
-VISUALIZATION_HEIGHT: 1080            # Output image height
-CES_STRIP_WIDTH: 100                  # Width of ESP/ESN waveform strip
-ACTUATOR_STRIP_WIDTH: 100             # Width of actuator output strip
-PHYSICAL_STRIP_WIDTH: 100             # Width of physical state strip
+VISUALIZATION_WIDTH: 1920
+VISUALIZATION_HEIGHT: 1080
+CES_STRIP_WIDTH: 100
+ACTUATOR_STRIP_WIDTH: 100
+PHYSICAL_STRIP_WIDTH: 100
 
-# CES Strip Colors (Cumulative Emotional State)
-CES_BG_COLOR: [14, 14, 14]              # Dark green background
-CES_ESP_COLOR: [14, 238, 14]        # Light green for ESP (positive)
-CES_ESN_COLOR: [235, 14, 14]            # Red for ESN (negative)
-CES_GRID_COLOR: [24, 24, 24]          # Dark grey grid lines
-CES_GRID_SPACING: 25                  # Grid line spacing in pixels
-CES_RANGE: 5000                       # Max range for ESP/ESN display (+/-)
+# CES Strip
+CES_BG_COLOR: [14, 14, 14]
+CES_ESP_COLOR: [14, 238, 14]
+CES_ESN_COLOR: [235, 14, 14]
+CES_GRID_COLOR: [24, 24, 24]
+CES_GRID_SPACING: 25
+CES_RANGE: 5000
 
 # Physical Strip Colors
-PHYSICAL_AGENT_COLOR: [0, 100, 255]   # Blue for agent position
-PHYSICAL_LAMP_COLOR: [255, 100, 0]    # Orange for lamp position
+PHYSICAL_AGENT_COLOR: [0, 100, 255]
+PHYSICAL_LAMP_COLOR: [255, 100, 0]
 
 # =============================================================================
-# Input Receptors (Sensor -> Neuron mappings)
-# Population coding with Stevens' power law for psychophysical accuracy
+# Input Receptors (auto-configured from head layout)
 # =============================================================================
+# Inputs are now configured automatically based on HEAD layout above.
+# The physical model provides: orgasm, terror_up, terror_down signals.
 
 inputs:
-  # Eye sensor: population with psychophysical mapping
-  - signal: "eye"
+  # Orgasm input - activates when agent matches lamp
+  - signal: "orgasm"
     type: "population"
-    neuron_start: 350               # First neuron index (in head region)
-    neuron_count: 125               # Spread signal across neurons
-    gamma: 0.4                   # Stevens' power law exponent for brightness
-    eq_gradient:                 # All negative EQ (light perception is costly)
-      low: -10                   # Low-index neurons (dim light)
-      high: -200                 # High-index neurons (bright light)
+    neuron_start: 700
+    neuron_count: 300
+    gamma: 0.5              # Smooth response curve
+    eq_gradient:
+      low: 50               # Edge of tolerance
+      high: 800             # Direct hit
+
+  # Terror Up - activates when agent is above lamp
+  - signal: "terror_up"
+    type: "population"
+    neuron_start: 100
+    neuron_count: 300
+    gamma: 2.0              # Logistic-like: slow start, sharp rise
+    eq_gradient:
+      low: -20              # Slight deviation
+      high: -600            # Far deviation
+
+  # Terror Down - activates when agent is below lamp
+  - signal: "terror_down"
+    type: "population"
+    neuron_start: 400
+    neuron_count: 300
+    gamma: 2.0              # Logistic-like: slow start, sharp rise
+    eq_gradient:
+      low: -20              # Slight deviation
+      high: -600            # Far deviation
 
 # =============================================================================
-# Output Actuators (Neuron -> Actuator mappings)
+# Output Actuators
 # =============================================================================
-# Each actuator: name, start, count, default_eq, color
-# Neurons from start to start+count-1 are assigned to the actuator
-# EQ is assigned to each participating neuron
-# Color is used for visualization in the actuator strip
 
 actuators:
-  - name: "motor"
-    start: 4500               # Near TAIL_COUNT
-    count: 100                # 100 neurons
-    default_eq: 25            # Positive EQ for motor activity
-    color: [0, 200, 255]      # Cyan for motor output
-    inputs:                   # Wire motor to receive from body
-      start: 2250             # Input from mid-body neurons
-      count: 100              # 100 source neurons
-      weight: 50              # Connection weight
-
-# =============================================================================
-# Innate Generators
-# =============================================================================
-
-innates:
-  # Hunger generator: fires periodically, positive motivation
-  hunger_generator:
-    idx: 60
-    eq: 25
-    charge_cycle: 100
-    inputs: []
-
-  # Satisfaction detector: responds to bright light (high-index eye neurons)
-  satisfaction_detector:
-    idx: 61
-    eq: 30
-    charge_cycle: 0
+  - name: "move_up"
+    start: 4000
+    count: 400
+    default_eq: 30
+    color: [100, 200, 255]  # Light blue
     inputs:
-      - [45, 300]    # Connected to eye_45 (bright-responsive)
-      - [48, 400]    # Connected to eye_48 (very bright-responsive)
-      - [49, 500]    # Connected to eye_49 (maximum brightness)
+      start: 2000           # Mid-body input
+      count: 200
+      weight: 30
 
-  # Pain detector: responds to darkness (absence of light)
-  # Fires when eye population is mostly inactive
-  pain_detector:
-    idx: 62
-    eq: -30
-    charge_cycle: 0
+  - name: "move_down"
+    start: 4500
+    count: 400
+    default_eq: 30
+    color: [255, 200, 100]  # Light orange
     inputs:
-      - [0, 800]    # Connected to eye_0 (always fires if any light)
+      start: 2200           # Mid-body input
+      count: 200
+      weight: 30
 
 # =============================================================================
-# Named Neurons (aliases for monitoring)
+# Innate Generators (disabled for now - using direct sensory input)
+# =============================================================================
+
+innates: {}
+
+# =============================================================================
+# Named Neurons
 # =============================================================================
 
 named:
-  motor_start: 4500         # First motor neuron (at TAIL_COUNT)
-  motor_mid: 4550           # Middle motor neuron
-  motor_end: 4599           # Last motor neuron
-  light_seeker: 100
-  eye_low: 350              # First eye neuron (always active if any light)
-  eye_mid: 412              # Middle eye neuron
-  eye_high: 474             # Last eye neuron (only active at max brightness)
-  hunger: 60
-  satisfaction: 61
-  pain: 62
+  reserve_end: 99
+  terror_up_start: 100
+  terror_up_end: 399
+  terror_down_start: 400
+  terror_down_end: 699
+  orgasm_start: 700
+  orgasm_end: 999
+  actuator_up_start: 4000
+  actuator_up_end: 4399
+  actuator_down_start: 4500
+  actuator_down_end: 4899
 
 # =============================================================================
-# Sauron's Finger - Dynamic Substrate Modification
+# Sauron's Finger (disabled for clean test)
 # =============================================================================
-# Press on neurons to modify their parameters using executable formulas.
-#
-# Parameters:
-#   name:     Identifier for the finger press
-#   x:        Center neuron index
-#   r:        Radius (neurons affected on each side of center)
-#   field:    Neuron attribute to modify:
-#             elastic_trigger, elastic_recharge, charge, cumulative_signal
-#   formula:  Executable formula for final effect: neuron[idx].field = eval(formula)
-#   shape:    Radial distribution formula (evaluated per neuron)
-#   rows:     Temporal activation windows with pressure distribution
-#             Each row: start, end, formula
-#
-# Available macros in formulas:
-#   IDX   - Current neuron index
-#   X     - Finger center (x)
-#   R     - Finger radius (r)
-#   DIST  - Distance from center: abs(IDX - X)
-#   PREV  - Previous value of the field
-#   SHAPE - Evaluated radial shape value [0..1]
-#   ROW   - Current iteration (in row formula)
-#   TEMPORAL - Evaluated row formula value
-#
-# Math functions available: exp, sin, cos, sqrt, abs, min, max, pi
 
-saurons_finger:
-  # Gaussian recharge boost at neuron 4350, iterations 400-600
-  - name: "recharge_boost"
-    x: 4350
-    r: 125
-    field: "elastic_recharge"
-    formula: "PREV + 15 * SHAPE * TEMPORAL"
-    shape: "exp(-0.5 * ((DIST / (R / 2.5)) ** 2))"
-    rows:
-      - start: 400
-        end: 600
-        formula: "1.0"
-
-  # Gaussian trigger boost at neuron 4450, ramping up then down
-  - name: "trigger_boost"
-    x: 4450
-    r: 150
-    field: "elastic_trigger"
-    formula: "PREV + 150 * SHAPE * TEMPORAL"
-    shape: "exp(-0.5 * ((DIST / (R / 2.5)) ** 2))"
-    rows:
-      - start: 400
-        end: 600
-        formula: "(ROW - 400) / 200"
-      - start: 600
-        end: 800
-        formula: "1.0 - (ROW - 600) / 200"
+saurons_finger: []

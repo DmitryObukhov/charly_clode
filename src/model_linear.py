@@ -3,13 +3,26 @@
 """
 Linear Physical Model - 1D World Simulation
 
-Implements a 1D world where an agent with a light sensor ("eye") and
-two flagella actuators navigates toward or away from a moving lamp.
+Implements a 1D world where an agent tracks a moving lamp.
+The agent receives pleasure (orgasm) when matching the lamp position,
+and pain (terror) when deviating above or below.
 
-Mathematical Models:
-- Light intensity: I = I_max / (1 + (d / d_0)^2)  [inverse-square falloff]
-- Lamp movement: pos = center + amplitude * sin(2 * pi * frequency * iteration)
-- Agent movement: delta = (left - right) * FLAGELLA_STRENGTH
+Lamp Movement:
+- Sine: pos = center + amplitude * sin(2 * pi * iteration / period)
+- Linear: pos = (iteration * speed) % 1.0
+- File: pos = data[iteration % len(data)]
+
+Agent Movement:
+- Controlled by move_up and move_down actuators
+- delta = (move_up - move_down) * agent_speed
+
+Sensors:
+- orgasm: Intensity of pleasure when matching lamp (0-1)
+- terror_up: Intensity of pain when agent > lamp (0-1)
+- terror_down: Intensity of pain when agent < lamp (0-1)
+- agent_pos: Normalized agent position (0-1)
+- lamp_pos: Normalized lamp position (0-1)
+- deviation: Signed distance (agent - lamp), normalized
 
 Usage:
     python model_linear.py
@@ -25,27 +38,11 @@ from physical_model import PhysicalModel
 
 class Linear(PhysicalModel):
     """
-    1D world physical model with agent and lamp.
+    1D world physical model with agent tracking a lamp.
 
-    The world is a 1D space where:
-    - Agent: Blue dot with light sensor and two flagella
-    - Lamp: Red dot moving sinusoidally as light source
-
-    Sensors:
-        eye: Light intensity at agent position [0, 1]
-        agent_pos: Normalized agent position [0, 1]
-        lamp_pos: Normalized lamp position [0, 1]
-
-    Actuators:
-        left: Left flagella activation [0, 1] - pushes agent RIGHT
-        right: Right flagella activation [0, 1] - pushes agent LEFT
-        motor: Single motor [0, 1] - 0=full left, 0.5=stop, 1=full right
+    The agent feels pleasure when matching the lamp position
+    and pain when deviating in either direction.
     """
-
-    # Physical constants
-    FLAGELLA_STRENGTH = 5.0     # Maximum movement per iteration
-    LIGHT_FALLOFF = 200.0       # Reference distance for light falloff
-    MAX_ILLUMINATION = 1.0      # Maximum light intensity
 
     # Visualization colors
     COLOR_AGENT = (0, 0, 255)   # Blue
@@ -53,105 +50,222 @@ class Linear(PhysicalModel):
     COLOR_BG = (0, 0, 0)        # Black
 
     def __init__(self,
-                 world_size: int = 1920,
-                 lamp_mode: str = 'linear',
-                 lamp_amplitude: Optional[float] = None,
-                 lamp_frequency: float = 2/1080,
-                 lamp_center: Optional[float] = None,
-                 lamp_speed: Optional[float] = None):
+                 world_size: int = 1000,
+                 lamp_mode: str = 'sine',
+                 lamp_amplitude: float = 0.4,
+                 lamp_period: int = 4000,
+                 lamp_center: float = 0.5,
+                 lamp_file: str = '',
+                 agent_speed: float = 0.001,
+                 agent_start: float = 0.5,
+                 orgasm_tolerance: float = 0.10,
+                 terror_range: float = 0.5,
+                 terror_smoothness: float = 50.0,
+                 orgasm_smoothness: float = 50.0):
         """
         Initialize the Linear physical model.
 
         Args:
-            world_size: Size of the 1D world in pixels (default: 1920)
-            lamp_mode: 'linear' (left to right) or 'sinusoidal' (oscillating)
-            lamp_amplitude: Lamp oscillation amplitude for sinusoidal mode (default: world_size/3)
-            lamp_frequency: Lamp oscillation frequency for sinusoidal mode (default: 2/1080)
-            lamp_center: Center of lamp oscillation for sinusoidal mode (default: world_size/2)
-            lamp_speed: Lamp movement speed for linear mode (default: world_size/1080)
+            world_size: Size of the 1D world (for visualization)
+            lamp_mode: 'sine', 'linear', or 'file'
+            lamp_amplitude: Amplitude for sine mode (fraction of world)
+            lamp_period: Period for sine mode (in steps)
+            lamp_center: Center position for sine mode (0-1)
+            lamp_file: CSV file path for file mode
+            agent_speed: Max movement per step (fraction of world)
+            agent_start: Starting position (0-1)
+            orgasm_tolerance: Tolerance for "hit" (fraction of world)
+            terror_range: Range where terror is felt (fraction of world)
+            terror_smoothness: Response curve 0-100 (0=binary, 50=sigmoid, 100=linear)
+            orgasm_smoothness: Response curve 0-100 (0=binary, 50=sigmoid, 100=linear)
         """
         super().__init__()
 
         self.world_size = world_size
         self.lamp_mode = lamp_mode
-        self.lamp_amplitude = lamp_amplitude if lamp_amplitude is not None else world_size / 3
-        self.lamp_frequency = lamp_frequency
-        self.lamp_center = lamp_center if lamp_center is not None else world_size / 2
-        self.lamp_speed = lamp_speed if lamp_speed is not None else world_size / 1080
+        self.lamp_amplitude = lamp_amplitude
+        self.lamp_period = lamp_period
+        self.lamp_center = lamp_center
+        self.lamp_file = lamp_file
+        self.agent_speed = agent_speed
+        self.agent_start = agent_start
+        self.orgasm_tolerance = orgasm_tolerance
+        self.terror_range = terror_range
+        self.terror_smoothness = terror_smoothness / 100.0  # Normalize to 0-1
+        self.orgasm_smoothness = orgasm_smoothness / 100.0  # Normalize to 0-1
 
-        # Initialize state
-        self.agent_pos = world_size / 2
+        # Load file data if needed
+        self.lamp_data = []
+        if lamp_mode == 'file' and lamp_file:
+            self._load_lamp_file(lamp_file)
+
+        # Initialize state (normalized 0-1)
+        self.agent_pos = agent_start
         self.lamp_pos = self._calculate_lamp_position(0)
-        self.illumination = self._calculate_illumination()
 
         self.log(f"Linear model initialized: world_size={world_size}")
+
+    def _load_lamp_file(self, filepath: str) -> None:
+        """Load lamp position data from CSV file."""
+        try:
+            with open(filepath, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        try:
+                            value = float(line.split(',')[0])
+                            self.lamp_data.append(value)
+                        except ValueError:
+                            continue
+
+            if self.lamp_data:
+                # Normalize to 0-1 range
+                min_val = min(self.lamp_data)
+                max_val = max(self.lamp_data)
+                if max_val > min_val:
+                    self.lamp_data = [(v - min_val) / (max_val - min_val)
+                                      for v in self.lamp_data]
+                self.log(f"Loaded {len(self.lamp_data)} lamp positions from {filepath}")
+        except Exception as e:
+            self.log(f"Warning: Could not load lamp file {filepath}: {e}")
+            self.lamp_data = []
 
     def _calculate_lamp_position(self, iteration: int) -> float:
         """
         Calculate lamp position based on movement mode.
 
-        Args:
-            iteration: Current iteration number
-
         Returns:
-            Lamp position in pixels
+            Lamp position normalized to [0, 1]
         """
-        if self.lamp_mode == 'linear':
-            # Linear movement from left (0) to right (world_size-1)
-            pos = iteration * self.lamp_speed
-        else:
+        if self.lamp_mode == 'file' and self.lamp_data:
+            idx = iteration % len(self.lamp_data)
+            return self.lamp_data[idx]
+
+        elif self.lamp_mode == 'linear':
+            # Linear sweep from 0 to 1, wrapping
+            pos = (iteration * 0.0001) % 1.0
+            return pos
+
+        else:  # 'sine' (default)
             # Sinusoidal oscillation around center
-            offset = self.lamp_amplitude * math.sin(2 * math.pi * self.lamp_frequency * iteration)
+            phase = 2 * math.pi * iteration / self.lamp_period
+            offset = self.lamp_amplitude * math.sin(phase)
             pos = self.lamp_center + offset
+            return max(0.0, min(1.0, pos))
 
-        return max(0, min(self.world_size - 1, pos))
-
-    def _calculate_illumination(self) -> float:
+    def _apply_response_curve(self, value: float, smoothness: float) -> float:
         """
-        Calculate light intensity at agent position.
+        Apply response curve to a normalized value [0,1].
 
-        Uses inverse-square falloff: I = I_max / (1 + (d / d_0)^2)
+        Args:
+            value: Input value in range [0, 1]
+            smoothness: Curve shape (0=binary step, 0.5=sigmoid, 1=linear)
 
         Returns:
-            Light intensity in range [0, 1]
+            Transformed value in range [0, 1]
         """
-        distance = abs(self.agent_pos - self.lamp_pos)
-        return self.MAX_ILLUMINATION / (1 + (distance / self.LIGHT_FALLOFF) ** 2)
+        value = max(0.0, min(1.0, value))
+
+        if smoothness <= 0.01:
+            # Binary step: 0 below 0.5, 1 at/above 0.5
+            return 0.0 if value < 0.5 else 1.0
+
+        elif smoothness >= 0.99:
+            # Linear: output = input
+            return value
+
+        else:
+            # Sigmoid with variable steepness
+            # steepness k: higher = steeper (more step-like)
+            # At smoothness=0.5, k=6 gives nice S-curve
+            # At smoothness→0, k→∞ (step)
+            # At smoothness→1, k→0 (linear)
+
+            # Map smoothness to steepness: inverse relationship
+            # k = 12 * (1 - smoothness) gives k=6 at smoothness=0.5
+            k = 12.0 * (1.0 - smoothness)
+
+            if k < 0.1:
+                # Very low steepness = effectively linear
+                return value
+
+            # Apply sigmoid: map [0,1] to [-k/2, k/2] then through sigmoid
+            x = (value - 0.5) * k
+            sigmoid_value = 1.0 / (1.0 + math.exp(-x))
+
+            # Blend sigmoid with linear based on smoothness
+            # Higher smoothness = more linear influence
+            blend = smoothness
+            return blend * value + (1.0 - blend) * sigmoid_value
+
+    def _calculate_sensory_signals(self) -> Dict[str, float]:
+        """
+        Calculate orgasm and terror signals based on agent-lamp distance.
+
+        Returns:
+            Dictionary with orgasm, terror_up, terror_down values (0-1)
+        """
+        # Signed deviation: positive = agent above lamp
+        deviation = self.agent_pos - self.lamp_pos
+        abs_deviation = abs(deviation)
+
+        # Orgasm: maximum at center, decreasing to edge of tolerance
+        if abs_deviation <= self.orgasm_tolerance:
+            # Within tolerance - feel pleasure
+            # Raw value: 1.0 at center, 0.0 at edge of tolerance
+            raw_orgasm = 1.0 - (abs_deviation / self.orgasm_tolerance)
+            # Apply response curve (inverted: we want high at center)
+            orgasm = self._apply_response_curve(raw_orgasm, self.orgasm_smoothness)
+            terror_up = 0.0
+            terror_down = 0.0
+        else:
+            # Outside tolerance - feel terror
+            orgasm = 0.0
+
+            # Calculate raw terror intensity (0 at tolerance edge, 1 at terror_range)
+            excess = abs_deviation - self.orgasm_tolerance
+            raw_terror = min(1.0, excess / self.terror_range)
+
+            # Apply response curve
+            terror_intensity = self._apply_response_curve(raw_terror, self.terror_smoothness)
+
+            if deviation > 0:
+                # Agent above lamp
+                terror_up = terror_intensity
+                terror_down = 0.0
+            else:
+                # Agent below lamp
+                terror_up = 0.0
+                terror_down = terror_intensity
+
+        return {
+            'orgasm': orgasm,
+            'terror_up': terror_up,
+            'terror_down': terror_down,
+            'deviation': deviation
+        }
 
     def set(self, actuators: Dict[str, float]) -> None:
         """
         Apply actuator values and advance simulation.
 
-        Left flagella pushes agent right, right flagella pushes left.
-        Motor: 0=full left, 0.5=stop, 1=full right
-
         Args:
-            actuators: Dictionary with 'left', 'right', and/or 'motor' activation [0, 1]
+            actuators: Dictionary with 'move_up' and 'move_down' activation [0, 1]
         """
-        # Get and clamp actuator values
-        left_activation = max(0.0, min(1.0, actuators.get('left', 0.0)))
-        right_activation = max(0.0, min(1.0, actuators.get('right', 0.0)))
-        motor_activation = actuators.get('motor', None)
+        # Get actuator values
+        move_up = max(0.0, min(1.0, actuators.get('move_up', 0.0)))
+        move_down = max(0.0, min(1.0, actuators.get('move_down', 0.0)))
 
-        # Calculate movement from left/right flagella
-        movement = (left_activation - right_activation) * self.FLAGELLA_STRENGTH
-
-        # Add motor contribution if present (0=left, 0.5=stop, 1=right)
-        if motor_activation is not None:
-            motor_activation = max(0.0, min(1.0, motor_activation))
-            motor_movement = (motor_activation - 0.5) * 2 * self.FLAGELLA_STRENGTH
-            movement += motor_movement
+        # Calculate movement
+        movement = (move_up - move_down) * self.agent_speed
 
         # Update agent position with boundary clamping
         new_pos = self.agent_pos + movement
-        self.agent_pos = max(0, min(self.world_size - 1, new_pos))
+        self.agent_pos = max(0.0, min(1.0, new_pos))
 
         # Increment iteration and update lamp position
         self.iteration += 1
         self.lamp_pos = self._calculate_lamp_position(self.iteration)
-
-        # Update illumination
-        self.illumination = self._calculate_illumination()
 
         # Save state to history
         self.save_state()
@@ -166,10 +280,15 @@ class Linear(PhysicalModel):
         Returns:
             Dictionary mapping sensor names to values
         """
+        signals = self._calculate_sensory_signals()
+
         all_sensors = {
-            'eye': self.illumination,
-            'agent_pos': self.agent_pos / self.world_size,
-            'lamp_pos': self.lamp_pos / self.world_size
+            'orgasm': signals['orgasm'],
+            'terror_up': signals['terror_up'],
+            'terror_down': signals['terror_down'],
+            'deviation': signals['deviation'],
+            'agent_pos': self.agent_pos,
+            'lamp_pos': self.lamp_pos
         }
 
         if sensors is None:
@@ -184,22 +303,28 @@ class Linear(PhysicalModel):
         Returns:
             Tuple of (sensor_names, actuator_names)
         """
-        return (['eye', 'agent_pos', 'lamp_pos'], ['left', 'right', 'motor'])
+        return (
+            ['orgasm', 'terror_up', 'terror_down', 'deviation', 'agent_pos', 'lamp_pos'],
+            ['move_up', 'move_down']
+        )
 
     def reset(self) -> None:
         """Reset model to initial state."""
         self.iteration = 0
-        self.agent_pos = self.world_size / 2
+        self.agent_pos = self.agent_start
         self.lamp_pos = self._calculate_lamp_position(0)
-        self.illumination = self._calculate_illumination()
         self.history = []
 
     def _get_state_snapshot(self) -> Dict:
         """Capture current state for history."""
+        signals = self._calculate_sensory_signals()
         return {
             'agent_pos': self.agent_pos,
             'lamp_pos': self.lamp_pos,
-            'illumination': self.illumination
+            'orgasm': signals['orgasm'],
+            'terror_up': signals['terror_up'],
+            'terror_down': signals['terror_down'],
+            'deviation': signals['deviation']
         }
 
     def _create_raw_visualization(self, num_iterations: int) -> Image.Image:
@@ -207,7 +332,7 @@ class Linear(PhysicalModel):
         Create visualization image from history.
 
         Each row is one iteration, each column is a world position.
-        Agent shown in blue (brightness = illumination), lamp in red.
+        Agent shown in blue, lamp in red.
 
         Args:
             num_iterations: Number of iterations to visualize
@@ -215,7 +340,6 @@ class Linear(PhysicalModel):
         Returns:
             PIL Image object
         """
-        # Image dimensions: width = world_size, height = iterations
         img_array = np.zeros((num_iterations, self.world_size, 3), dtype=np.uint8)
 
         for row_idx in range(num_iterations):
@@ -223,9 +347,8 @@ class Linear(PhysicalModel):
                 break
 
             state = self.history[row_idx]
-            agent_x = int(state['agent_pos'])
-            lamp_x = int(state['lamp_pos'])
-            illumination = state['illumination']
+            agent_x = int(state['agent_pos'] * (self.world_size - 1))
+            lamp_x = int(state['lamp_pos'] * (self.world_size - 1))
 
             # Clamp positions to valid range
             agent_x = max(0, min(self.world_size - 1, agent_x))
@@ -234,13 +357,10 @@ class Linear(PhysicalModel):
             # Draw lamp (red)
             img_array[row_idx, lamp_x] = self.COLOR_LAMP
 
-            # Draw agent (blue, brightness varies with illumination)
-            brightness = max(0.2, illumination)  # Minimum brightness for visibility
-            agent_color = (
-                0,
-                0,
-                max(50, int(255 * brightness))
-            )
+            # Draw agent (blue, brighter when in orgasm)
+            orgasm = state.get('orgasm', 0)
+            brightness = 0.3 + 0.7 * orgasm  # 30% to 100% brightness
+            agent_color = (0, 0, int(255 * brightness))
             img_array[row_idx, agent_x] = agent_color
 
         return Image.fromarray(img_array, 'RGB')
@@ -250,7 +370,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Linear Physical Model Test")
-    parser.add_argument('--size', type=int, default=1920, help='World size')
+    parser.add_argument('--size', type=int, default=1000, help='World size')
     parser.add_argument('--steps', type=int, default=500, help='Simulation steps')
     parser.add_argument('--output', type=str, default='linear_test.png', help='Output file')
 
@@ -262,18 +382,26 @@ if __name__ == "__main__":
     print(f"Sensors: {model.get_names()[0]}")
     print(f"Actuators: {model.get_names()[1]}")
 
-    # Run simulation with oscillating actuators
+    # Run simulation - agent tries to follow lamp with simple logic
     for i in range(args.steps):
-        # Alternate left/right to create movement
-        phase = math.sin(i * 0.05)
-        left = max(0, phase)
-        right = max(0, -phase)
+        sensors = model.get()
 
-        model.set({'left': left, 'right': right})
+        # Simple following logic
+        deviation = sensors['deviation']
+        if deviation > 0.01:
+            # Agent above lamp - move down
+            model.set({'move_up': 0.0, 'move_down': 0.5})
+        elif deviation < -0.01:
+            # Agent below lamp - move up
+            model.set({'move_up': 0.5, 'move_down': 0.0})
+        else:
+            # On target
+            model.set({'move_up': 0.0, 'move_down': 0.0})
 
         if (i + 1) % 100 == 0:
-            sensors = model.get()
-            print(f"Step {i+1}: eye={sensors['eye']:.3f}, "
+            print(f"Step {i+1}: orgasm={sensors['orgasm']:.3f}, "
+                  f"terror_up={sensors['terror_up']:.3f}, "
+                  f"terror_down={sensors['terror_down']:.3f}, "
                   f"agent={sensors['agent_pos']:.3f}, lamp={sensors['lamp_pos']:.3f}")
 
     # Save visualization

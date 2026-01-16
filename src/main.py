@@ -154,9 +154,22 @@ def run_live_visualization(config_path: str, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
 
     # Create physical model
-    world_size = config.get('WORLD_SIZE', 1920)
+    world_size = config.get('WORLD_SIZE', 1000)
     print(f"Creating Linear physical model (world_size={world_size})...")
-    physical_model = Linear(world_size=world_size)
+    physical_model = Linear(
+        world_size=world_size,
+        lamp_mode=config.get('LAMP_MODE', 'sine'),
+        lamp_amplitude=config.get('LAMP_AMPLITUDE', 0.4),
+        lamp_period=config.get('LAMP_PERIOD', 4000),
+        lamp_center=config.get('LAMP_CENTER', 0.5),
+        lamp_file=config.get('LAMP_FILE', ''),
+        agent_speed=config.get('AGENT_SPEED', 0.001),
+        agent_start=config.get('AGENT_START', 0.5),
+        orgasm_tolerance=config.get('ORGASM_TOLERANCE', 0.10),
+        terror_range=config.get('TERROR_RANGE', 0.5),
+        terror_smoothness=config.get('TERROR_SMOOTHNESS', 50),
+        orgasm_smoothness=config.get('ORGASM_SMOOTHNESS', 50)
+    )
 
     # Create Charly instance
     print("Initializing Charly neural substrate...")
@@ -457,9 +470,22 @@ def run_simulation(config_path: str,
     os.makedirs(output_dir, exist_ok=True)
 
     # Create physical model
-    world_size = config.get('WORLD_SIZE', 1920)
+    world_size = config.get('WORLD_SIZE', 1000)
     print(f"Creating Linear physical model (world_size={world_size})...")
-    physical_model = Linear(world_size=world_size)
+    physical_model = Linear(
+        world_size=world_size,
+        lamp_mode=config.get('LAMP_MODE', 'sine'),
+        lamp_amplitude=config.get('LAMP_AMPLITUDE', 0.4),
+        lamp_period=config.get('LAMP_PERIOD', 4000),
+        lamp_center=config.get('LAMP_CENTER', 0.5),
+        lamp_file=config.get('LAMP_FILE', ''),
+        agent_speed=config.get('AGENT_SPEED', 0.001),
+        agent_start=config.get('AGENT_START', 0.5),
+        orgasm_tolerance=config.get('ORGASM_TOLERANCE', 0.10),
+        terror_range=config.get('TERROR_RANGE', 0.5),
+        terror_smoothness=config.get('TERROR_SMOOTHNESS', 50),
+        orgasm_smoothness=config.get('ORGASM_SMOOTHNESS', 50)
+    )
 
     # Create Charly instance
     print("Initializing Charly neural substrate...")
