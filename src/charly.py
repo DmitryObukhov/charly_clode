@@ -42,6 +42,7 @@ class Neuron:
         elastic_recharge: Elastic component of recharge rate
         charge_cycle: Period for cyclic discharge (0 = disabled)
         history: String of '0' and '1' representing activation history
+        fatigue: Accumulated fatigue level (reduces recharge capability)
     """
     name: str = ""
     active: bool = False
@@ -52,6 +53,7 @@ class Neuron:
     elastic_recharge: float = 0.0
     charge_cycle: int = 0
     history: str = ""
+    fatigue: float = 0.0
 
     def clone(self) -> 'Neuron':
         """Create a deep copy of the neuron."""
@@ -64,7 +66,8 @@ class Neuron:
             charge=self.charge,
             elastic_recharge=self.elastic_recharge,
             charge_cycle=self.charge_cycle,
-            history=self.history
+            history=self.history,
+            fatigue=self.fatigue
         )
 
 
@@ -171,6 +174,10 @@ class Charly:
         self.elastic_trigger_deg = config.get('ELASTIC_TRIGGER_DEGRADATION', 1)
         self.elastic_recharge_prop = config.get('ELASTIC_RECHARGE_PROPAGATION', 0.75)
         self.elastic_recharge_deg = config.get('ELASTIC_RECHARGE_DEGRADATION', 1)
+        self.fatigue_increment = config.get('FATIGUE_INCREMENT', 5)
+        self.fatigue_decrement = config.get('FATIGUE_DECREMENT', 1)
+        self.fatigue_max = config.get('FATIGUE_MAX', 100)
+        self.fatigue_smoothness = config.get('FATIGUE_SMOOTHNESS', 50) / 100.0  # Normalize to 0-1
         self.history_maxlen = config.get('HISTORY_MAXLEN', 256)
         self.links_min = config.get('LINKS_PER_NEURON_MIN', 10)
         self.links_max = config.get('LINKS_PER_NEURON_MAX', 200)
@@ -754,6 +761,41 @@ class Charly:
 
         return outputs
 
+    def _apply_fatigue_curve(self, fatigue_ratio: float) -> float:
+        """
+        Apply response curve to fatigue ratio to get recharge suppression.
+
+        Args:
+            fatigue_ratio: Fatigue / max_fatigue in range [0, 1]
+
+        Returns:
+            Recharge multiplier in range [0, 1] where:
+            - 0 = full suppression (no recharge)
+            - 1 = no suppression (full recharge)
+        """
+        fatigue_ratio = max(0.0, min(1.0, fatigue_ratio))
+        smoothness = self.fatigue_smoothness
+
+        if smoothness <= 0.01:
+            # Binary: full recharge below 0.5 fatigue, no recharge at/above
+            suppression = 0.0 if fatigue_ratio < 0.5 else 1.0
+        elif smoothness >= 0.99:
+            # Linear suppression
+            suppression = fatigue_ratio
+        else:
+            # Sigmoid with variable steepness
+            k = 12.0 * (1.0 - smoothness)
+            if k < 0.1:
+                suppression = fatigue_ratio
+            else:
+                x = (fatigue_ratio - 0.5) * k
+                sigmoid_value = 1.0 / (1.0 + math.exp(-x))
+                blend = smoothness
+                suppression = blend * fatigue_ratio + (1.0 - blend) * sigmoid_value
+
+        # Return recharge multiplier (inverse of suppression)
+        return 1.0 - suppression
+
     def _process_neuron(self, idx: int) -> None:
         """Process a single neuron and update its state in the next array."""
         current_neuron = self.current[idx]
@@ -764,7 +806,10 @@ class Charly:
         next_neuron.name = current_neuron.name
         next_neuron.charge_cycle = current_neuron.charge_cycle
 
-        # Step 2: Calculate cumulative signal
+        # Step 2: Update fatigue (recovery toward 0)
+        next_neuron.fatigue = max(0.0, current_neuron.fatigue - self.fatigue_decrement)
+
+        # Step 3: Calculate cumulative signal
         inputs = self.connectome.get_inputs(idx)
         cumulative_signal = 0.0
         has_active_inputs = False
@@ -777,7 +822,7 @@ class Charly:
 
         next_neuron.cumulative_signal = cumulative_signal
 
-        # Step 3: Update elastic parameters
+        # Step 4: Update elastic parameters
         if has_active_inputs:
             next_neuron.elastic_trigger = current_neuron.elastic_trigger * self.elastic_trigger_prop
             next_neuron.elastic_recharge = current_neuron.elastic_recharge * self.elastic_recharge_prop
@@ -785,10 +830,13 @@ class Charly:
             next_neuron.elastic_trigger = max(0, current_neuron.elastic_trigger - self.elastic_trigger_deg)
             next_neuron.elastic_recharge = max(0, current_neuron.elastic_recharge - self.elastic_recharge_deg)
 
-        # Step 4: Update charge
-        next_neuron.charge = current_neuron.charge + self.recharge_rate + next_neuron.elastic_recharge
+        # Step 5: Update charge (with fatigue suppression)
+        fatigue_ratio = current_neuron.fatigue / self.fatigue_max if self.fatigue_max > 0 else 0
+        recharge_multiplier = self._apply_fatigue_curve(fatigue_ratio)
+        effective_recharge = (self.recharge_rate + next_neuron.elastic_recharge) * recharge_multiplier
+        next_neuron.charge = current_neuron.charge + effective_recharge
 
-        # Step 5: Determine activation
+        # Step 6: Determine activation
         activated = False
 
         if next_neuron.charge < self.charge_min:
@@ -802,7 +850,11 @@ class Charly:
 
         next_neuron.active = activated
 
-        # Step 6: Update history
+        # Step 7: Update fatigue based on activation
+        if activated:
+            next_neuron.fatigue = min(self.fatigue_max, next_neuron.fatigue + self.fatigue_increment)
+
+        # Step 8: Update history
         history = current_neuron.history + ('1' if activated else '0')
         if len(history) > self.history_maxlen:
             history = history[-self.history_maxlen:]

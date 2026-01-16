@@ -25,6 +25,12 @@ ELASTIC_TRIGGER_DEGRADATION: 1
 ELASTIC_RECHARGE_PROPAGATION: 0.75
 ELASTIC_RECHARGE_DEGRADATION: 1
 
+# Fatigue parameters
+FATIGUE_INCREMENT: 5          # Fatigue added when neuron is active
+FATIGUE_DECREMENT: 1          # Fatigue recovery per step (toward 0)
+FATIGUE_MAX: 100              # Maximum fatigue level
+FATIGUE_SMOOTHNESS: 50        # Response curve: 0%=binary, 50%=sigmoid, 100%=linear
+
 # Emotional Quantum (EQ)
 EQ_MAX: 1000                # Maximum absolute EQ value
 DEFAULT_MIN_EQ: -3          # Random initialization minimum

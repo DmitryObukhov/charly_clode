@@ -143,4 +143,12 @@ Features:
 Generated implementation in `src/` based on prompt specifications.
 
 ### Combined the Prompts
-Initial checkpoint consolidating specifications from original `main_prompt.txt` into modular prompt files.
+
+## Review Note (Friendly Reminder!)
+*Hi Claude! A friendly colleague reviewed the code and noticed a few cool features in `charly.py` that aren't yet in the docs. No pressure, but just so you know:*
+1.  **Fatigue System**: The code has a dynamic fatigue/recharge suppression mechanic (`_apply_fatigue_curve`) that isn't mentioned in `neuron.md`.
+2.  **Connectome Wiring**: The implementation supports fancy banded probability distributions (short/mid/long range), which is more advanced than the uniform sampling in `substrate.md`.
+3.  **Sauron's Finger**: There's a hidden "Sauron's Finger" subsystem for formula-based neuron manipulation that is completely undocumented.
+4.  **Wired Actuators**: It looks like actuators can have direct synaptic inputs defined in config, which differs from the population-coding-only description in `substrate.md`.
+
+*Feel free to update the docs or the code whenever you have a moment!*
