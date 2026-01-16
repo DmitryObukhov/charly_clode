@@ -19,8 +19,11 @@ import argparse
 import os
 import sys
 from typing import List, Optional
+from datetime import datetime
 
 import yaml
+import numpy as np
+import cv2
 
 from physical_model import PhysicalModel
 from model_linear import Linear
@@ -96,6 +99,299 @@ def create_video(image_dir: str,
         print("Warning: Neither opencv-python nor moviepy is installed.")
         print("Install with: pip install opencv-python")
         return False
+
+
+def run_live_visualization(config_path: str, output_dir: str) -> None:
+    """
+    Run simulation with live scrolling visualization.
+
+    Opens a 1920x1080 window that shows neural activity in real-time.
+    Each iteration adds one row. When 1080 rows are filled, the display
+    scrolls up to always show the last 1080 iterations.
+
+    Args:
+        config_path: Path to configuration YAML file
+        output_dir: Output directory for final results
+    """
+    # Load configuration
+    print(f"Loading configuration from {config_path}...")
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    # Display parameters
+    display_width = config.get('VISUALIZATION_WIDTH', 1920)
+    display_height = config.get('VISUALIZATION_HEIGHT', 1080)
+    day_steps = config.get('DAY_STEPS', 20000)
+    neuron_count = config.get('NEURON_COUNT', 21920)
+    head_count = config.get('HEAD_COUNT', 2000)
+    eq_max = config.get('EQ_MAX', 255)
+
+    # Strip widths
+    ces_strip_width = config.get('CES_STRIP_WIDTH', 100)
+    actuator_strip_width = config.get('ACTUATOR_STRIP_WIDTH', 100)
+    physical_strip_width = config.get('PHYSICAL_STRIP_WIDTH', 100)
+    ces_grid_spacing = config.get('CES_GRID_SPACING', 25)
+    ces_range = config.get('CES_RANGE', 5000)
+
+    # Calculate neural diagram width (without strips)
+    n_separators = 3  # 3 separators for 3 strips
+    total_strip_width = ces_strip_width + actuator_strip_width + physical_strip_width + n_separators
+    neural_width = display_width - total_strip_width
+
+    # Colors (BGR for OpenCV)
+    pos_color = tuple(reversed(config.get('NEURON_POSITIVE_COLOR', [0, 255, 0])))
+    neg_color = tuple(reversed(config.get('NEURON_NEGATIVE_COLOR', [255, 0, 0])))
+    bg_color = tuple(reversed(config.get('NEURON_BG_COLOR', [0, 0, 0])))
+    head_inactive_color = tuple(reversed(config.get('HEAD_INACTIVE_COLOR', [14, 14, 14])))
+    ces_bg_color = tuple(reversed(config.get('CES_BG_COLOR', [14, 14, 14])))
+    ces_esp_color = tuple(reversed(config.get('CES_ESP_COLOR', [14, 238, 14])))
+    ces_esn_color = tuple(reversed(config.get('CES_ESN_COLOR', [235, 14, 14])))
+    ces_grid_color = tuple(reversed(config.get('CES_GRID_COLOR', [24, 24, 24])))
+    physical_agent_color = tuple(reversed(config.get('PHYSICAL_AGENT_COLOR', [0, 100, 255])))
+    physical_lamp_color = tuple(reversed(config.get('PHYSICAL_LAMP_COLOR', [255, 100, 0])))
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create physical model
+    world_size = config.get('WORLD_SIZE', 1920)
+    print(f"Creating Linear physical model (world_size={world_size})...")
+    physical_model = Linear(world_size=world_size)
+
+    # Create Charly instance
+    print("Initializing Charly neural substrate...")
+    charly = Charly(config, physical_model)
+
+    # Get actuator info
+    actuator_indices = set()
+    actuator_info = {}
+    for name, cfg in charly.actuators.items():
+        actuator_indices.update(cfg.get('indices', []))
+        actuator_info[name] = {
+            'color': tuple(reversed(cfg.get('color', [255, 255, 255]))),  # BGR
+        }
+
+    # Initialize display buffer (1080 rows of raw neural data)
+    # We store raw data and scale to display on render
+    raw_buffer = np.zeros((display_height, neuron_count, 3), dtype=np.uint8)
+    raw_buffer[:, :] = bg_color
+
+    # CES, actuator, physical strip buffers
+    ces_buffer = np.zeros((display_height, ces_strip_width, 3), dtype=np.uint8)
+    ces_buffer[:, :] = ces_bg_color
+
+    actuator_buffer = np.zeros((display_height, actuator_strip_width, 3), dtype=np.uint8)
+    actuator_buffer[:, :] = ces_bg_color
+
+    physical_buffer = np.zeros((display_height, physical_strip_width, 3), dtype=np.uint8)
+    physical_buffer[:, :] = ces_bg_color
+
+    # Tracking for normalization
+    max_esp = 1
+    max_esn = 1
+    max_actuator_output = {name: 0.001 for name in actuator_info}
+
+    # Create window
+    window_name = "Charly Neural Substrate - Live"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, display_width, display_height)
+
+    print(f"\nStarting live simulation for {day_steps} steps...")
+    print("Press 'q' to quit, 's' to save current frame")
+    print("=" * 50)
+
+    # Initialize day
+    charly.day_history = []
+    actuator_values = None
+    row_index = 0
+
+    for step in range(day_steps):
+        # Execute one step
+        result = charly.day_step(actuator_values)
+        actuator_values = result['outputs']
+
+        esp = result['esp']
+        esn = abs(result['esn'])
+        inputs = result['inputs']
+        outputs = result['outputs']
+
+        # Update max values for normalization
+        if esp > max_esp:
+            max_esp = esp
+        if esn > max_esn:
+            max_esn = esn
+        for name, val in outputs.items():
+            if val > max_actuator_output.get(name, 0):
+                max_actuator_output[name] = val
+
+        # Determine which row to update (scrolling logic)
+        if row_index < display_height:
+            y = row_index
+        else:
+            # Shift all buffers up by 1 row
+            raw_buffer[:-1] = raw_buffer[1:]
+            ces_buffer[:-1] = ces_buffer[1:]
+            actuator_buffer[:-1] = actuator_buffer[1:]
+            physical_buffer[:-1] = physical_buffer[1:]
+            y = display_height - 1
+
+            # Clear the new bottom row
+            raw_buffer[y, :] = bg_color
+            ces_buffer[y, :] = ces_bg_color
+            actuator_buffer[y, :] = ces_bg_color
+            physical_buffer[y, :] = ces_bg_color
+
+        # Update neural buffer with current neuron states
+        for x, neuron in enumerate(charly.current):
+            if x >= neuron_count:
+                break
+
+            if neuron.active:
+                eq = neuron.eq
+                brightness = min(1.0, abs(eq) / eq_max) if eq_max > 0 else 1.0
+                brightness = max(0.2, brightness)
+
+                if eq > 0:
+                    color = tuple(int(c * brightness) for c in pos_color)
+                else:
+                    color = tuple(int(c * brightness) for c in neg_color)
+
+                raw_buffer[y, x] = color
+            elif x < head_count:
+                raw_buffer[y, x] = head_inactive_color
+            elif x in actuator_indices:
+                raw_buffer[y, x] = head_inactive_color
+            else:
+                raw_buffer[y, x] = bg_color
+
+        # Update CES buffer - bar chart from center (fixed range +/- ces_range)
+        ces_buffer[y, :] = ces_bg_color
+        # Draw grid
+        for gx in range(0, ces_strip_width, ces_grid_spacing):
+            ces_buffer[y, gx] = ces_grid_color
+        # Center line
+        center_x = ces_strip_width // 2
+        ces_buffer[y, center_x] = ces_grid_color
+        # Draw ESP as green bar from center to right
+        esp_normalized = min(1.0, esp / ces_range)
+        esp_width = int(esp_normalized * (center_x - 1))
+        for bx in range(center_x, center_x + esp_width + 1):
+            if bx < ces_strip_width:
+                ces_buffer[y, bx] = ces_esp_color
+        # Draw ESN as red bar from center to left
+        esn_normalized = min(1.0, esn / ces_range)
+        esn_width = int(esn_normalized * (center_x - 1))
+        for bx in range(center_x - esn_width, center_x):
+            if bx >= 0:
+                ces_buffer[y, bx] = ces_esn_color
+
+        # Update actuator buffer
+        actuator_buffer[y, :] = ces_bg_color
+        for gx in range(0, actuator_strip_width, ces_grid_spacing):
+            actuator_buffer[y, gx] = ces_grid_color
+
+        actuator_names = list(actuator_info.keys())
+        n_actuators = len(actuator_names)
+        if n_actuators > 0:
+            strip_per_actuator = actuator_strip_width // n_actuators
+            for i, name in enumerate(actuator_names):
+                color = actuator_info[name]['color']
+                output_val = outputs.get(name, 0.0)
+                max_val = max_actuator_output.get(name, 0.001)
+                normalized = output_val / max_val if max_val > 0 else 0
+                strip_start = i * strip_per_actuator
+                x_pos = strip_start + int(normalized * (strip_per_actuator - 1))
+                if 0 <= x_pos < actuator_strip_width:
+                    actuator_buffer[y, x_pos] = color
+
+        # Update physical buffer
+        physical_buffer[y, :] = ces_bg_color
+        for gx in range(0, physical_strip_width, ces_grid_spacing):
+            physical_buffer[y, gx] = ces_grid_color
+
+        agent_pos = inputs.get('agent_pos', 0.5)
+        lamp_pos = inputs.get('lamp_pos', 0.5)
+        agent_x = int(agent_pos * (physical_strip_width - 1))
+        agent_x = max(0, min(physical_strip_width - 1, agent_x))
+        lamp_x = int(lamp_pos * (physical_strip_width - 1))
+        lamp_x = max(0, min(physical_strip_width - 1, lamp_x))
+        physical_buffer[y, agent_x] = physical_agent_color
+        physical_buffer[y, lamp_x] = physical_lamp_color
+
+        row_index += 1
+
+        # Compose final display frame
+        # Scale neural buffer to neural_width
+        neural_scaled = cv2.resize(raw_buffer, (neural_width, display_height),
+                                   interpolation=cv2.INTER_NEAREST)
+
+        # Create display frame
+        display_frame = np.zeros((display_height, display_width, 3), dtype=np.uint8)
+        display_frame[:, :neural_width] = neural_scaled
+
+        # Add separator and actuator strip
+        x_offset = neural_width
+        display_frame[:, x_offset] = (255, 255, 255)  # White separator
+        x_offset += 1
+        display_frame[:, x_offset:x_offset + actuator_strip_width] = actuator_buffer
+        x_offset += actuator_strip_width
+
+        # Add separator and physical strip
+        display_frame[:, x_offset] = (255, 255, 255)
+        x_offset += 1
+        display_frame[:, x_offset:x_offset + physical_strip_width] = physical_buffer
+        x_offset += physical_strip_width
+
+        # Add separator and CES strip
+        display_frame[:, x_offset] = (255, 255, 255)
+        x_offset += 1
+        display_frame[:, x_offset:x_offset + ces_strip_width] = ces_buffer
+
+        # Add step count and timestamp overlay in lower left corner
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        info_text = f"Step: {step+1}/{day_steps}  Time: {timestamp}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        font_color = (255, 255, 255)  # White
+        thickness = 1
+        text_y = display_height - 15
+        cv2.putText(display_frame, info_text, (10, text_y), font, font_scale, font_color, thickness, cv2.LINE_AA)
+
+        # Show frame
+        cv2.imshow(window_name, display_frame)
+
+        # Handle key events (non-blocking)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            print("\nSimulation interrupted by user (q pressed)")
+            break
+        elif key == ord('s'):
+            frame_file = os.path.join(output_dir, f"frame_{step:06d}.png")
+            cv2.imwrite(frame_file, display_frame)
+            print(f"Saved frame to {frame_file}")
+
+        # Check if window was closed
+        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+            print("\nSimulation interrupted by user (window closed)")
+            break
+
+        # Progress output every 1000 steps
+        if (step + 1) % 1000 == 0:
+            print(f"  Step {step+1}/{day_steps}: ESP={esp}, ESN={result['esn']}")
+
+    # Run night phase
+    print("\nRunning night phase...")
+    charly.run_night()
+
+    # Save final visualization
+    final_file = os.path.join(output_dir, "day_0000.png")
+    cv2.imwrite(final_file, display_frame)
+    print(f"Final frame saved to {final_file}")
+
+    # Wait for key before closing
+    print("\nSimulation complete! Press any key in the window to close...")
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
 def clean_output_directory(output_dir: str) -> None:
@@ -258,6 +554,9 @@ Examples:
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Logging verbosity (default: INFO)')
 
+    parser.add_argument('--live', '-l', action='store_true',
+                       help='Run with live visualization window (scrolling display)')
+
     args = parser.parse_args()
 
     # Check config file exists
@@ -267,14 +566,20 @@ Examples:
         sys.exit(1)
 
     try:
-        run_simulation(
-            config_path=args.config,
-            num_days=args.days,
-            output_dir=args.output,
-            fps=args.fps,
-            no_video=args.no_video,
-            log_level=args.log_level
-        )
+        if args.live:
+            run_live_visualization(
+                config_path=args.config,
+                output_dir=args.output
+            )
+        else:
+            run_simulation(
+                config_path=args.config,
+                num_days=args.days,
+                output_dir=args.output,
+                fps=args.fps,
+                no_video=args.no_video,
+                log_level=args.log_level
+            )
     except KeyboardInterrupt:
         print("\nSimulation interrupted by user")
         sys.exit(1)

@@ -1,12 +1,17 @@
 # Charly - Neuromorphic Simulation Framework
 
-**Version 0.1** - Elastic Control Proof of Concept
+**Version 0.2** - Live Visualization
 
-Charly is a neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality. This version proves that **elastic control mechanisms (Sauron's Finger) can modulate the Cumulative Emotional State (CES)**.
+Charly is a neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality.
 
 ## Quick Start
 
 ```batch
+# Live visualization mode (recommended)
+cd src
+python main.py --live
+
+# Batch mode
 run.bat 5              # Run simulation for 5 days
 run.bat 10 results     # Run 10 days, output to results/
 ```
@@ -70,7 +75,24 @@ The project uses a prompt-driven development approach:
 
 ## Checkpoints
 
-### v0.1 - Elastic Control Proof of Concept (Current)
+### v0.2 - Live Visualization (Current)
+Real-time monitoring of neural activity with scrolling display.
+
+Features:
+- **Live Mode** (`--live` flag): Opens 1920x1080 window with real-time visualization
+- **Scrolling Display**: Shows last 1080 iterations, scrolls when buffer fills
+- **CES Bar Chart**: ESP (green) extends right from center, ESN (red) extends left
+- **Configurable CES Range**: `CES_RANGE` parameter (default: +/- 5000)
+- **Info Overlay**: Step count and timestamp in lower left corner
+- **Keyboard Controls**: `q` to quit, `s` to save frame
+- **Window Close Detection**: X button properly stops simulation
+
+Configuration:
+- Reduced to 5000 neurons for faster iteration
+- 20000 steps per day for longer simulations
+- All neuron indices proportionally scaled
+
+### v0.1 - Elastic Control Proof of Concept
 **Key Finding**: Elastic control via Sauron's Finger can modulate CES (Cumulative Emotional State).
 
 Features:

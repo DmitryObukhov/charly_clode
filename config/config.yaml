@@ -9,9 +9,9 @@ SEED: 42
 # =============================================================================
 
 # Neuron counts
-NEURON_COUNT: 21920          # Total neurons in substrate
-HEAD_COUNT: 2000             # Sensory/innate region (indices 0 to HEAD_COUNT-1)
-TAIL_COUNT: 20000            # Motor/output region start index
+NEURON_COUNT: 5000           # Total neurons in substrate
+HEAD_COUNT: 500              # Sensory/innate region (indices 0 to HEAD_COUNT-1)
+TAIL_COUNT: 4500             # Motor/output region start index
 
 # Charge dynamics (tuned for slower propagation)
 CHARGE_MIN: 100             # Minimum charge required for neuron to fire
@@ -54,19 +54,19 @@ LINK_DISTRIBUTION_DEFAULT: [80, 15, 5]
 # "Zebra" pattern: alternating local (80-15-5) and distant (5-15-80) connectivity
 
 connectome_distribution:
-  # Segment 1: neurons 2000-4000 - local connectivity
-  - start: 2000
-    end: 6000
+  # Segment 1: neurons 500-1500 - local connectivity
+  - start: 500
+    end: 1500
     distribution: [90, 5, 5]
 
-  # Segment 2: neurons 4000-6000 - distant connectivity
-  - start: 6000
-    end: 10000
+  # Segment 2: neurons 1500-2500 - distant connectivity
+  - start: 1500
+    end: 2500
     distribution: [1, 1, 98]
 
-  # Segment 3: neurons 6000-8000 - local connectivity
-  - start: 10000
-    end: 22000
+  # Segment 3: neurons 2500-5000 - local connectivity
+  - start: 2500
+    end: 5000
     distribution: [98, 2, 0]
 
 
@@ -75,7 +75,7 @@ connectome_distribution:
 HISTORY_MAXLEN: 256         # Maximum neuron activation history length
 
 # Timing
-DAY_STEPS: 1080             # Iterations per day phase
+DAY_STEPS: 20000            # Iterations per day phase
 
 # =============================================================================
 # Physical Model Parameters
@@ -96,6 +96,7 @@ VISUALIZATION_WIDTH: 1920             # Output image width
 VISUALIZATION_HEIGHT: 1080            # Output image height
 CES_STRIP_WIDTH: 100                  # Width of ESP/ESN waveform strip
 ACTUATOR_STRIP_WIDTH: 100             # Width of actuator output strip
+PHYSICAL_STRIP_WIDTH: 100             # Width of physical state strip
 
 # CES Strip Colors (Cumulative Emotional State)
 CES_BG_COLOR: [14, 14, 14]              # Dark green background
@@ -103,6 +104,11 @@ CES_ESP_COLOR: [14, 238, 14]        # Light green for ESP (positive)
 CES_ESN_COLOR: [235, 14, 14]            # Red for ESN (negative)
 CES_GRID_COLOR: [24, 24, 24]          # Dark grey grid lines
 CES_GRID_SPACING: 25                  # Grid line spacing in pixels
+CES_RANGE: 5000                       # Max range for ESP/ESN display (+/-)
+
+# Physical Strip Colors
+PHYSICAL_AGENT_COLOR: [0, 100, 255]   # Blue for agent position
+PHYSICAL_LAMP_COLOR: [255, 100, 0]    # Orange for lamp position
 
 # =============================================================================
 # Input Receptors (Sensor -> Neuron mappings)
@@ -110,11 +116,11 @@ CES_GRID_SPACING: 25                  # Grid line spacing in pixels
 # =============================================================================
 
 inputs:
-  # Eye sensor: 50-neuron population with psychophysical mapping
+  # Eye sensor: population with psychophysical mapping
   - signal: "eye"
     type: "population"
-    neuron_start: 1500              # First neuron index
-    neuron_count: 500             # Spread signal across 50 neurons
+    neuron_start: 350               # First neuron index (in head region)
+    neuron_count: 125               # Spread signal across neurons
     gamma: 0.4                   # Stevens' power law exponent for brightness
     eq_gradient:                 # All negative EQ (light perception is costly)
       low: -10                   # Low-index neurons (dim light)
@@ -130,10 +136,14 @@ inputs:
 
 actuators:
   - name: "motor"
-    start: 20000              # Near TAIL_COUNT
+    start: 4500               # Near TAIL_COUNT
     count: 100                # 100 neurons
     default_eq: 25            # Positive EQ for motor activity
     color: [0, 200, 255]      # Cyan for motor output
+    inputs:                   # Wire motor to receive from body
+      start: 2250             # Input from mid-body neurons
+      count: 100              # 100 source neurons
+      weight: 50              # Connection weight
 
 # =============================================================================
 # Innate Generators
@@ -171,13 +181,13 @@ innates:
 # =============================================================================
 
 named:
-  motor_start: 20000        # First motor neuron (at TAIL_COUNT)
-  motor_mid: 20050          # Middle motor neuron
-  motor_end: 20099          # Last motor neuron
+  motor_start: 4500         # First motor neuron (at TAIL_COUNT)
+  motor_mid: 4550           # Middle motor neuron
+  motor_end: 4599           # Last motor neuron
   light_seeker: 100
-  eye_low: 0                # First eye neuron (always active if any light)
-  eye_mid: 25               # Middle eye neuron
-  eye_high: 49              # Last eye neuron (only active at max brightness)
+  eye_low: 350              # First eye neuron (always active if any light)
+  eye_mid: 412              # Middle eye neuron
+  eye_high: 474             # Last eye neuron (only active at max brightness)
   hunger: 60
   satisfaction: 61
   pain: 62
@@ -211,10 +221,10 @@ named:
 # Math functions available: exp, sin, cos, sqrt, abs, min, max, pi
 
 saurons_finger:
-  # Gaussian recharge boost at neuron 10000, iterations 400-600
+  # Gaussian recharge boost at neuron 4350, iterations 400-600
   - name: "recharge_boost"
-    x: 19000
-    r: 500
+    x: 4350
+    r: 125
     field: "elastic_recharge"
     formula: "PREV + 15 * SHAPE * TEMPORAL"
     shape: "exp(-0.5 * ((DIST / (R / 2.5)) ** 2))"
@@ -223,10 +233,10 @@ saurons_finger:
         end: 600
         formula: "1.0"
 
-  # Gaussian trigger boost at neuron 12000, ramping up then down
+  # Gaussian trigger boost at neuron 4450, ramping up then down
   - name: "trigger_boost"
-    x: 19500
-    r: 600
+    x: 4450
+    r: 150
     field: "elastic_trigger"
     formula: "PREV + 150 * SHAPE * TEMPORAL"
     shape: "exp(-0.5 * ((DIST / (R / 2.5)) ** 2))"
