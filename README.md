@@ -1,20 +1,36 @@
 # Charly - Neuromorphic Simulation Framework
 
-**Version 0.3** - Orgasm/Terror Physical Model
+**Version 0.4** - Arc Visualization & Multi-Finger Control
 
 Charly is a neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality.
 
 ## Quick Start
 
 ```batch
-# Live visualization mode (recommended)
 cd src
+
+# Arc visualization (recommended) - connectome as horizontal chain with arcs
+python main.py --arc
+
+# Live visualization - scrolling neural activity heatmap
 python main.py --live
 
-# Batch mode
-run.bat 5              # Run simulation for 5 days
-run.bat 10 results     # Run 10 days, output to results/
+# Batch mode - run multiple days with video output
+python main.py --days 5 --output results
 ```
+
+### Interactive Controls (Arc & Live modes)
+
+| Key | Action |
+|-----|--------|
+| `1` | Trigger Finger (elastic_trigger) |
+| `2` | EQ Finger (emotional quantum) |
+| `3` | Fatigue Finger |
+| `4` | Charge Finger |
+| LMB | Apply positive effect |
+| RMB | Apply negative effect |
+| `q` | Quit |
+| `s` | Save frame |
 
 ## Project Structure
 
@@ -75,7 +91,36 @@ The project uses a prompt-driven development approach:
 
 ## Checkpoints
 
-### v0.3 - Orgasm/Terror Physical Model (Current)
+### v0.4 - Arc Visualization & Multi-Finger Control (Current)
+
+New visualization mode and expanded Sauron's Finger system.
+
+**Arc Visualization** (`--arc`):
+- Neurons displayed as horizontal chain
+- Active connections shown as arcs (green up = +EQ, red down = -EQ)
+- Arc brightness = weight × recency (fades over 128 cycles)
+- Frame averaging over 4 steps for smooth display
+- Auto-saves all frames as PNG, compiles to MP4 on exit
+
+**Multi-Finger System**:
+| Finger | Field | Positive (+) | Negative (-) |
+|--------|-------|--------------|--------------|
+| Trigger | `elastic_trigger` | Easier to fire | Harder to fire |
+| EQ | `eq` | +pleasure | +pain |
+| Fatigue | `fatigue` | Hyperactive | Exhausted |
+| Charge | `charge` | Inject charge | Drain charge |
+
+**Connectome Improvements**:
+- `LINK_LENGTH_MAX`: 500 → 1000 (reaches all head zones)
+- Banded distributions reaching terror (100-399) and orgasm (700-999)
+- Segment 1000-1500: [30, 30, 40] - heavy long-range to head
+
+**Documentation Updates**:
+- Fatigue system fully documented in `neuron.md`
+- All finger types documented in `substrate.md`
+- Interactive controls documented
+
+### v0.3 - Orgasm/Terror Physical Model
 New physical model where agent tracks a moving lamp with pleasure/pain feedback.
 
 Features:
@@ -144,11 +189,3 @@ Generated implementation in `src/` based on prompt specifications.
 
 ### Combined the Prompts
 
-## Review Note (Friendly Reminder!)
-*Hi Claude! A friendly colleague reviewed the code and noticed a few cool features in `charly.py` that aren't yet in the docs. No pressure, but just so you know:*
-1.  **Fatigue System**: The code has a dynamic fatigue/recharge suppression mechanic (`_apply_fatigue_curve`) that isn't mentioned in `neuron.md`.
-2.  **Connectome Wiring**: The implementation supports fancy banded probability distributions (short/mid/long range), which is more advanced than the uniform sampling in `substrate.md`.
-3.  **Sauron's Finger**: There's a hidden "Sauron's Finger" subsystem for formula-based neuron manipulation that is completely undocumented.
-4.  **Wired Actuators**: It looks like actuators can have direct synaptic inputs defined in config, which differs from the population-coding-only description in `substrate.md`.
-
-*Feel free to update the docs or the code whenever you have a moment!*

@@ -78,30 +78,82 @@ reindex()                                      # Rebuild indices
 
 ### Connection Generation
 
-Body neurons (HEAD_COUNT onwards) receive random connections:
+Body neurons (HEAD_COUNT onwards) receive random connections using **banded probability distributions**. Connections are categorized into three distance bands (short/mid/long) with configurable allocation percentages.
+
+#### Distance Bands
+
+The link length range is divided into three bands:
+
+```
+|<---- short --->|<-------- mid -------->|<---- long ---->|
+0           short_max                long_min      LINK_LENGTH_MAX
+```
+
+| Parameter | Default | Formula |
+|-----------|---------|---------|
+| LINK_LEN_SHORT_RANGE | 10 | short_max = LINK_LENGTH_MAX × 10% |
+| LINK_LEN_LONG_RANGE | 10 | long_min = LINK_LENGTH_MAX × 90% |
+
+#### Distribution Configuration
+
+Each neuron segment can have a different distribution:
+
+```yaml
+# config.yaml
+LINK_DISTRIBUTION_DEFAULT: [80, 15, 5]  # [short%, mid%, long%]
+
+connectome_distribution:
+  - start: 200
+    end: 500
+    distribution: [80, 15, 5]   # Local connectivity (mostly short)
+  - start: 500
+    end: 800
+    distribution: [5, 15, 80]   # Distant connectivity (mostly long)
+  # Creates "zebra" pattern: alternating local and distant bands
+```
+
+#### Algorithm
 
 ```python
 for dst_idx in range(HEAD_COUNT, NEURON_COUNT):
-    # Random number of links
     n_links = rng.randint(LINKS_PER_NEURON_MIN, LINKS_PER_NEURON_MAX)
 
-    # Find candidates within distance
-    candidates = [src for src in range(NEURON_COUNT)
-                  if src != dst and abs(src - dst) <= LINK_LENGTH_MAX]
+    # Get distribution for this neuron's segment
+    dist = get_distribution(dst_idx)  # e.g., [80, 15, 5]
+    short_pct, mid_pct, long_pct = dist[0]/100, dist[1]/100, dist[2]/100
 
-    # Select and weight
-    selected = rng.sample(candidates, min(n_links, len(candidates)))
+    # Categorize candidates by distance band
+    short_candidates = [src for distance <= short_max]
+    mid_candidates = [src for short_max < distance < long_min]
+    long_candidates = [src for distance >= long_min]
+
+    # Calculate target count for each band
+    n_short = int(n_links * short_pct)
+    n_long = int(n_links * long_pct)
+    n_mid = n_links - n_short - n_long
+
+    # Sample from each band
+    selected = sample(short_candidates, n_short)
+             + sample(mid_candidates, n_mid)
+             + sample(long_candidates, n_long)
+
+    # Assign normalized weights
     weights = normalize_to(DEFAULT_CUMULATIVE_INPUT)
 
     for src, weight in zip(selected, weights):
         connectome.add(src, dst, weight)
 ```
 
+#### Parameters
+
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
 | LINKS_PER_NEURON_MIN | 10 | Minimum synapses per neuron |
 | LINKS_PER_NEURON_MAX | 200 | Maximum synapses per neuron |
 | LINK_LENGTH_MAX | 200 | Maximum index distance for connections |
+| LINK_LEN_SHORT_RANGE | 10 | Percentage of range for "short" band |
+| LINK_LEN_LONG_RANGE | 10 | Percentage of range for "long" band |
+| LINK_DISTRIBUTION_DEFAULT | [80, 15, 5] | Default [short%, mid%, long%] |
 | DEFAULT_CUMULATIVE_INPUT | 1000 | Total weight per neuron |
 
 ---
@@ -172,21 +224,57 @@ self.receptors = {
 
 ### 4. `_configure_actuators()`
 
-Maps neuron groups to physical model actuators:
+Maps neuron groups to physical model actuators. Supports two formats:
+
+#### New Format (Recommended)
+
+List of actuator definitions with optional wired inputs:
 
 ```yaml
 # config.yaml
 actuators:
-  left: [180, 181, 182, 183, 184, 185, 186, 187, 188, 189]
-  right: [190, 191, 192, 193, 194, 195, 196, 197, 198, 199]
+  - name: move_up
+    start: 4000          # First neuron index
+    count: 400           # Number of neurons
+    default_eq: 5        # EQ assigned to all neurons
+    color: [0, 255, 0]   # Visualization color
+    inputs:              # Optional: wire direct synaptic connections
+      start: 700         # Source neuron range start
+      count: 300         # Number of source neurons
+      weight: 100        # Weight per connection
+
+  - name: move_down
+    start: 4500
+    count: 400
+    default_eq: 5
+    color: [255, 0, 0]
+    # No inputs: actuator receives connections only from connectome
 ```
+
+**Wired Inputs**: When `inputs` is specified, direct synaptic connections are added from the source range to all actuator neurons. This bypasses the random connectome for targeted control (e.g., connecting pleasure/pain signals directly to motor neurons).
 
 **Result structure:**
 ```python
 self.actuators = {
-    "left": [180, 181, ..., 189],
-    "right": [190, 191, ..., 199]
+    "move_up": {
+        'indices': [4000, 4001, ..., 4399],
+        'color': (0, 255, 0),
+        'start': 4000,
+        'count': 400
+    },
+    ...
 }
+```
+
+#### Legacy Format
+
+Simple dict mapping names to neuron index lists:
+
+```yaml
+# config.yaml (legacy)
+actuators:
+  left: [180, 181, 182, 183, 184, 185, 186, 187, 188, 189]
+  right: [190, 191, 192, 193, 194, 195, 196, 197, 198, 199]
 ```
 
 ### 5. `_configure_innates()`
@@ -235,6 +323,173 @@ def _identify_stars(self) -> None:
 ```
 
 Stars are used during night phase learning.
+
+### 8. `_configure_saurons_finger()`
+
+Configures dynamic substrate modification using formula-based "finger presses":
+
+```yaml
+# config.yaml
+saurons_finger:
+  - name: suppression_wave
+    x: 500                    # Center neuron index
+    r: 100                    # Radius (affects neurons x-r to x+r)
+    field: elastic_trigger    # Field to modify
+    shape: "exp(-((DIST/R)**2))"  # Gaussian falloff
+    formula: "PREV + SHAPE * TEMPORAL * 100"
+    rows:
+      - start: 0              # Active from iteration 0
+        end: 500              # Until iteration 500
+        formula: "1.0"        # Full strength
+      - start: 501
+        end: 1000
+        formula: "1.0 - (ROW - 501) / 500"  # Linear fade out
+```
+
+See **Sauron's Finger** section below for full documentation.
+
+---
+
+## Sauron's Finger
+
+A subsystem for formula-based dynamic modification of neuron fields during simulation. Named for its ability to "press" on the neural substrate with configurable spatial and temporal patterns.
+
+### Configuration
+
+Each finger press defines:
+
+| Field | Purpose |
+|-------|---------|
+| `name` | Identifier for logging |
+| `x` | Center neuron index |
+| `r` | Radius of effect |
+| `field` | Neuron field to modify (see table below) |
+| `shape` | Formula for spatial falloff |
+| `formula` | Formula for new field value |
+| `rows` | List of temporal windows |
+
+### Supported Field Types
+
+| Field | Effect | Use Case |
+|-------|--------|----------|
+| `elastic_trigger` | Modifies activation threshold | Make neurons easier/harder to fire |
+| `elastic_recharge` | Modifies recharge rate | Speed up/slow down recovery |
+| `charge` | Directly injects/drains charge | Force activation or silence neurons |
+| `cumulative_signal` | Adds artificial input signal | Simulate external input |
+| `eq` | Changes emotional quantum | Turn neutral zone into pleasure/pain |
+| `fatigue` | Adds/removes fatigue | Create hyperactive or exhausted zones |
+
+### Finger Types Summary
+
+**1. Trigger Finger** (`elastic_trigger`)
+- Lowers threshold → neurons fire more easily
+- Raises threshold → neurons become less responsive
+- Affects wave propagation speed and spread
+
+**2. EQ Finger** (`eq`)
+- Increases EQ → zone contributes positive emotion (ESP)
+- Decreases EQ → zone contributes negative emotion (ESN)
+- Affects learning during night phase (star neurons)
+
+**3. Fatigue Finger** (`fatigue`)
+- Reduces fatigue → neurons can fire rapidly (hyperactive)
+- Increases fatigue → neurons become exhausted (silenced)
+- Creates local "anesthesia" or "stimulation" effects
+
+**4. Charge Finger** (`charge`)
+- Injects charge → forces neurons toward firing threshold
+- Drains charge → prevents neurons from firing
+- Most direct intervention, immediate effect
+
+### Formula Variables (Macros)
+
+Formulas can use these variables:
+
+| Variable | Description |
+|----------|-------------|
+| `IDX` | Current neuron index |
+| `X` | Center of finger press |
+| `R` | Radius of finger press |
+| `DIST` | Distance from center: \|IDX - X\| |
+| `PREV` | Current value of the target field |
+| `SHAPE` | Evaluated shape formula result |
+| `TEMPORAL` | Evaluated row formula result (0 if no row active) |
+| `ROW` | Current iteration (for row formulas) |
+
+### Available Math Functions
+
+```python
+exp, sin, cos, sqrt, abs, min, max, pi, e
+```
+
+### Example: Gaussian Suppression
+
+```yaml
+saurons_finger:
+  - name: center_suppression
+    x: 960                    # Center of substrate
+    r: 200
+    field: elastic_trigger
+    shape: "exp(-((DIST/R)**2) * 2)"  # Gaussian with width control
+    formula: "PREV + SHAPE * TEMPORAL * 50"
+    rows:
+      - start: 0
+        end: 1080
+        formula: "sin(ROW / 100 * pi)"  # Sinusoidal pulse
+```
+
+### Temporal Windows (Rows)
+
+Each row defines when the finger is active:
+
+```yaml
+rows:
+  - start: 0      # First active iteration
+    end: 500      # Last active iteration
+    formula: "1.0"  # Temporal multiplier (evaluated with ROW variable)
+```
+
+Multiple rows can create complex temporal patterns:
+- Only one row is active at a time (first matching)
+- If no row matches current iteration, `TEMPORAL = 0` and finger has no effect
+
+### Interactive Mode (Arc Visualization)
+
+When running with `--arc` flag, fingers can be applied interactively:
+
+```
+python main.py --arc
+```
+
+**Controls:**
+| Key | Action |
+|-----|--------|
+| `1` | Select Trigger Finger (elastic_trigger) |
+| `2` | Select EQ Finger (emotional quantum) |
+| `3` | Select Fatigue Finger |
+| `4` | Select Charge Finger |
+| LMB | Apply positive effect (lower threshold, +EQ, -fatigue, +charge) |
+| RMB | Apply negative effect (raise threshold, -EQ, +fatigue, -charge) |
+| `q` | Quit simulation |
+
+**Visual Indicators:**
+- Yellow: Trigger Finger
+- Green: EQ Finger
+- Magenta: Fatigue Finger
+- Cyan: Charge Finger
+
+### Application Order
+
+Finger presses are applied during `day_step()` after input processing but before body neuron processing:
+
+```
+1. Process inputs (activate receptors)
+2. Process innates (fire generators)
+3. Apply Sauron's Finger presses  ← HERE
+4. Copy head activations to next array
+5. Process body neurons
+6. Calculate emotional state
+```
 
 ---
 

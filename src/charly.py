@@ -689,6 +689,10 @@ class Charly:
                     neuron.charge = new_value
                 elif field == 'cumulative_signal':
                     neuron.cumulative_signal = new_value
+                elif field == 'eq':
+                    neuron.eq = int(new_value)
+                elif field == 'fatigue':
+                    neuron.fatigue = max(0.0, min(self.fatigue_max, new_value))
 
     def _process_inputs(self) -> None:
         """Process sensory inputs and activate receptor neurons.

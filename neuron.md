@@ -18,6 +18,7 @@ class Neuron:
     elastic_recharge: float = 0.0
     charge_cycle: int = 0
     history: str = ""
+    fatigue: float = 0.0
 ```
 
 ## Field Descriptions
@@ -33,6 +34,7 @@ class Neuron:
 | `elastic_recharge` | float | 0.0 | Elastic adjustment to recharge rate |
 | `charge_cycle` | int | 0 | Period for cyclic discharge (0 = disabled) |
 | `history` | str | "" | Rolling string of '0'/'1' tracking recent activations |
+| `fatigue` | float | 0.0 | Accumulated fatigue level (suppresses recharge when high) |
 
 ## Neuron Initialization
 
@@ -46,7 +48,8 @@ neuron = Neuron(
     charge=0.0,
     elastic_recharge=0.0,
     charge_cycle=0,
-    history=""
+    history="",
+    fatigue=0.0
 )
 ```
 
@@ -78,7 +81,14 @@ next_neuron.name = current_neuron.name
 next_neuron.charge_cycle = current_neuron.charge_cycle
 ```
 
-### Step 2: Calculate Cumulative Signal
+### Step 2: Fatigue Recovery
+```python
+next_neuron.fatigue = max(0.0, current_neuron.fatigue - FATIGUE_DECREMENT)
+```
+
+Fatigue decreases by `FATIGUE_DECREMENT` each iteration, recovering toward 0.
+
+### Step 3: Calculate Cumulative Signal
 ```python
 inputs = self.connectome.get_inputs(idx)
 cumulative_signal = 0.0
@@ -99,7 +109,7 @@ cumulative_signal = Σ (weight_i × active_i)
 ```
 where `active_i` is 1 if source neuron is active, 0 otherwise.
 
-### Step 3: Update Elastic Parameters
+### Step 4: Update Elastic Parameters
 
 **With active inputs (propagation):**
 ```python
@@ -120,28 +130,35 @@ next_neuron.elastic_recharge = max(0, current_neuron.elastic_recharge - ELASTIC_
 | ELASTIC_RECHARGE_PROPAGATION | 0.75 | Elastic recharge preserved at 75% |
 | ELASTIC_RECHARGE_DEGRADATION | 1 | Decay by 1 per iteration |
 
-### Step 4: Accumulate Charge
+### Step 5: Accumulate Charge (with Fatigue Suppression)
 ```python
-next_neuron.charge = current_neuron.charge + RECHARGE_RATE + next_neuron.elastic_recharge
+fatigue_ratio = current_neuron.fatigue / FATIGUE_MAX
+recharge_multiplier = _apply_fatigue_curve(fatigue_ratio)
+effective_recharge = (RECHARGE_RATE + next_neuron.elastic_recharge) * recharge_multiplier
+next_neuron.charge = current_neuron.charge + effective_recharge
 ```
 
 **Formula:**
 ```
-charge_new = charge_old + RECHARGE_RATE + elastic_recharge
+fatigue_ratio = fatigue / FATIGUE_MAX
+recharge_multiplier = _apply_fatigue_curve(fatigue_ratio)  # [0, 1]
+charge_new = charge_old + (RECHARGE_RATE + elastic_recharge) × recharge_multiplier
 ```
 
-### Step 5: Activation Decision
+High fatigue suppresses recharge, preventing rapid repeated firing.
+
+### Step 6: Activation Decision
 
 Three-stage check in priority order:
 
-**5a. Charge Minimum Check:**
+**6a. Charge Minimum Check:**
 ```python
 if next_neuron.charge < CHARGE_MIN:
     activated = False
 ```
 Neuron cannot fire if charge is below minimum threshold.
 
-**5b. Cyclic Discharge:**
+**6b. Cyclic Discharge:**
 ```python
 elif current_neuron.charge_cycle > 0 and iteration % current_neuron.charge_cycle == 0:
     activated = True
@@ -149,7 +166,7 @@ elif current_neuron.charge_cycle > 0 and iteration % current_neuron.charge_cycle
 ```
 Generator neurons fire periodically regardless of input.
 
-**5c. Threshold Crossing:**
+**6c. Threshold Crossing:**
 ```python
 elif cumulative_signal > (NORMAL_TRIGGER + next_neuron.elastic_trigger):
     activated = True
@@ -163,7 +180,15 @@ threshold = NORMAL_TRIGGER + elastic_trigger
 ```
 Elastic trigger can lower the effective threshold (when negative) or raise it (when positive).
 
-### Step 6: Update History
+### Step 7: Fatigue Increment
+```python
+if activated:
+    next_neuron.fatigue = min(FATIGUE_MAX, next_neuron.fatigue + FATIGUE_INCREMENT)
+```
+
+Firing increases fatigue, which will suppress future recharge until recovery.
+
+### Step 8: Update History
 ```python
 history = current_neuron.history + ('1' if activated else '0')
 if len(history) > HISTORY_MAXLEN:
@@ -180,13 +205,15 @@ Rolling window of activation states (default: 256 characters).
 | Step | Operation | Formula/Condition |
 |------|-----------|-------------------|
 | 1 | Base Copy | Preserve EQ, name, charge_cycle |
-| 2 | Signal Calc | `cumulative_signal = Σ(weight × active)` |
-| 3 | Elastic Update | Propagate (×0.75) or decay (-1) |
-| 4 | Charge Accum | `charge += RECHARGE_RATE + elastic_recharge` |
-| 5a | Charge Check | `charge < CHARGE_MIN` → inactive |
-| 5b | Cyclic Fire | `iteration % charge_cycle == 0` → active |
-| 5c | Threshold | `signal > NORMAL_TRIGGER + elastic_trigger` → active |
-| 6 | History | Append '1' or '0', trim to HISTORY_MAXLEN |
+| 2 | Fatigue Recovery | `fatigue -= FATIGUE_DECREMENT` (min 0) |
+| 3 | Signal Calc | `cumulative_signal = Σ(weight × active)` |
+| 4 | Elastic Update | Propagate (×0.75) or decay (-1) |
+| 5 | Charge Accum | `charge += (RECHARGE_RATE + elastic_recharge) × recharge_mult` |
+| 6a | Charge Check | `charge < CHARGE_MIN` → inactive |
+| 6b | Cyclic Fire | `iteration % charge_cycle == 0` → active |
+| 6c | Threshold | `signal > NORMAL_TRIGGER + elastic_trigger` → active |
+| 7 | Fatigue Increment | If activated: `fatigue += FATIGUE_INCREMENT` (max FATIGUE_MAX) |
+| 8 | History | Append '1' or '0', trim to HISTORY_MAXLEN |
 
 ---
 
@@ -210,11 +237,80 @@ Rolling window of activation states (default: 256 characters).
 | DEFAULT_MAX_EQ | 3 | Random initialization maximum |
 | STAR_LEVEL | 20 | Minimum |EQ| for star classification |
 
+### Fatigue
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| FATIGUE_INCREMENT | 5 | Fatigue added on each activation |
+| FATIGUE_DECREMENT | 1 | Fatigue recovered per iteration |
+| FATIGUE_MAX | 100 | Maximum fatigue level |
+| FATIGUE_SMOOTHNESS | 50 | Response curve shape (0-100, see below) |
+
 ### History
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
 | HISTORY_MAXLEN | 256 | Maximum activation history length |
+
+---
+
+## Fatigue System
+
+The fatigue system prevents neurons from firing in rapid succession by suppressing recharge when fatigued.
+
+### Response Curve: `_apply_fatigue_curve(fatigue_ratio)`
+
+Converts fatigue level to a recharge multiplier using a configurable response curve.
+
+**Input:** `fatigue_ratio` = fatigue / FATIGUE_MAX (range [0, 1])
+
+**Output:** `recharge_multiplier` (range [0, 1])
+- 0 = full suppression (no recharge)
+- 1 = no suppression (full recharge)
+
+**FATIGUE_SMOOTHNESS controls the curve shape:**
+
+| Smoothness | Behavior |
+|------------|----------|
+| 0% | Binary: full recharge below 50% fatigue, no recharge above |
+| 50% | Sigmoid: S-curve transition around 50% fatigue |
+| 100% | Linear: proportional suppression |
+
+**Formula (sigmoid mode):**
+```python
+k = 12.0 * (1.0 - smoothness)
+x = (fatigue_ratio - 0.5) * k
+sigmoid = 1.0 / (1.0 + exp(-x))
+suppression = blend * fatigue_ratio + (1 - blend) * sigmoid
+recharge_multiplier = 1.0 - suppression
+```
+
+### Fatigue Lifecycle
+
+```
+           ┌──────────────────┐
+           │ Neuron Activates │
+           └────────┬─────────┘
+                    │
+                    ▼
+      ┌─────────────────────────────┐
+      │ fatigue += FATIGUE_INCREMENT│
+      │ (capped at FATIGUE_MAX)     │
+      └─────────────────────────────┘
+                    │
+                    ▼
+      ┌─────────────────────────────┐
+      │ High fatigue suppresses     │
+      │ recharge via curve function │
+      └─────────────────────────────┘
+                    │
+                    ▼
+      ┌─────────────────────────────┐
+      │ Each iteration:             │
+      │ fatigue -= FATIGUE_DECREMENT│
+      │ (until fatigue = 0)         │
+      └─────────────────────────────┘
+```
 
 ---
 

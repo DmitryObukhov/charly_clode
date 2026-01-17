@@ -11,11 +11,12 @@ SEED: 42
 # Neuron counts
 NEURON_COUNT: 5000           # Total neurons in substrate
 HEAD_COUNT: 1000             # Sensory region (indices 0 to HEAD_COUNT-1)
-TAIL_COUNT: 4000             # Motor/output region start index
+BODY_COUNT: 3000             # Integration region (indices HEAD_COUNT to HEAD_COUNT+BODY_COUNT-1)
+TAIL_COUNT: 1000             # Motor/output region start index
 
 # Charge dynamics
 CHARGE_MIN: 100             # Minimum charge required for neuron to fire
-RECHARGE_RATE: 20           # Base charge accumulation per iteration
+RECHARGE_RATE: 10           # Base charge accumulation per iteration
 NORMAL_TRIGGER: 100         # Threshold for cumulative signal activation
 DEFAULT_CUMULATIVE_INPUT: 2000  # Total synapse weight per neuron
 
@@ -39,33 +40,38 @@ STAR_LEVEL: 50              # Minimum |EQ| for star classification
 
 # Connectome generation
 LINKS_PER_NEURON_MIN: 30
-LINKS_PER_NEURON_MAX: 200
-LINK_LENGTH_MAX: 500
+LINKS_PER_NEURON_MAX: 2000
+LINK_LENGTH_MAX: 1000         # Was 500 - now reaches all head neurons from body
 
 # Link length distribution bands
-LINK_LEN_SHORT_RANGE: 10
-LINK_LEN_LONG_RANGE: 10
-LINK_DISTRIBUTION_DEFAULT: [80, 15, 5]
+LINK_LEN_SHORT_RANGE: 20      # Short = 0-200 neurons
+LINK_LEN_LONG_RANGE: 30       # Long = 700-1000 neurons (reaches terror zones)
+LINK_DISTRIBUTION_DEFAULT: [50, 25, 25]  # More long-range to reach head
 
 # =============================================================================
 # Connectome Distribution Segments
 # =============================================================================
 
 connectome_distribution:
-  # Head region - local connectivity
+  # Post-head region - reaches back to ALL head zones (100-999)
   - start: 1000
-    end: 2000
-    distribution: [90, 5, 5]
+    end: 1500
+    distribution: [30, 30, 40]   # Heavy long-range to reach terror (100-399)
+
+  # Body integration zone - bridges head signals to mid-body
+  - start: 1500
+    end: 2500
+    distribution: [40, 35, 25]   # Balanced with long reach
 
   # Mid body - distant connectivity for integration
-  - start: 2000
-    end: 3000
-    distribution: [10, 10, 80]
+  - start: 2500
+    end: 3500
+    distribution: [30, 30, 40]   # Long-range for global integration
 
-  # Pre-tail - local connectivity
-  - start: 3000
+  # Pre-tail - connects to body and actuators
+  - start: 3500
     end: 5000
-    distribution: [95, 4, 1]
+    distribution: [50, 30, 20]   # Reaches back to mid-body
 
 # History
 HISTORY_MAXLEN: 256
