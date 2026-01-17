@@ -18,6 +18,7 @@ Usage:
 import random
 import math
 import os
+import pickle
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import defaultdict
@@ -1301,6 +1302,77 @@ class Charly:
             self.log(f"Faceshot saved to {filename}")
 
         return img
+
+
+    def save_state(self, path: str) -> None:
+        """
+        Save the complete Charly state to a file.
+        
+        This serializes:
+        - Configuration and seeds
+        - Current and Next neuron arrays
+        - Connectome (synapses)
+        - Day/Iteration counters
+        - Innates/Receptors/Actuators configuration
+        """
+        state = {
+            'config': self.config,
+            'iteration': self.iteration,
+            'day_index': self.day_index,
+            'rng_state': self.rng.getstate(),
+            'current': self.current,
+            'next': self.next,
+            'connectome': self.connectome,
+            'receptors': self.receptors,
+            'actuators': self.actuators,
+            'innates': self.innates,
+            'named': self.named,
+            'stars': self.stars,
+            'finger_presses': self.finger_presses,
+            'day_history': []  # Don't save full history to avoid huge files
+        }
+        
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
+        self.log(f"Charly state saved to {path}")
+
+    @staticmethod
+    def load_state(path: str, physical_model: PhysicalModel) -> 'Charly':
+        """
+        Load Charly state from a file.
+        
+        Args:
+           path: Path to the pickle file.
+           physical_model: The connected physical model instance (must be initialized separately).
+           
+        Returns:
+           Restored Charly instance.
+        """
+        with open(path, 'rb') as f:
+            state = pickle.load(f)
+            
+        # create instance with loaded config
+        charly = Charly(state['config'], physical_model)
+        
+        # restore state
+        charly.iteration = state['iteration']
+        charly.day_index = state['day_index']
+        charly.rng.setstate(state['rng_state'])
+        
+        charly.current = state['current']
+        charly.next = state['next']
+        charly.connectome = state['connectome']
+        
+        # restore mappings (though they should be same if config is same)
+        charly.receptors = state['receptors']
+        charly.actuators = state['actuators']
+        charly.innates = state['innates']
+        charly.named = state['named']
+        charly.stars = state['stars']
+        charly.finger_presses = state['finger_presses']
+        
+        charly.log(f"Charly state loaded from {path} (Day {charly.day_index}, Iter {charly.iteration})")
+        return charly
 
 
 if __name__ == "__main__":

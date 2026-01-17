@@ -29,6 +29,7 @@ Usage:
 """
 
 import math
+import pickle
 from typing import Dict, List, Set, Tuple, Union, Optional
 from PIL import Image
 import numpy as np
@@ -364,6 +365,34 @@ class Linear(PhysicalModel):
             img_array[row_idx, agent_x] = agent_color
 
         return Image.fromarray(img_array, 'RGB')
+
+    def save_state_to_file(self, path: str) -> None:
+        """Save state to pickle file."""
+        state = {
+            'iteration': self.iteration,
+            'agent_pos': self.agent_pos,
+            'lamp_pos': self.lamp_pos,
+            'history': self.history[-1000:]  # Keep only last 1000 for efficiency
+        }
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
+        self.log(f"Linear model state saved to {path}")
+
+    def load_state_from_file(self, path: str) -> None:
+        """Load state from pickle file."""
+        try:
+            with open(path, 'rb') as f:
+                state = pickle.load(f)
+            
+            self.iteration = state.get('iteration', 0)
+            self.agent_pos = state.get('agent_pos', 0.5)
+            self.lamp_pos = state.get('lamp_pos', 0.5)
+            self.history = state.get('history', [])
+            
+            self.log(f"Linear model state loaded from {path} (iter {self.iteration})")
+        except Exception as e:
+            self.log(f"Error loading Linear model state: {e}")
+            raise e
 
 
 if __name__ == "__main__":

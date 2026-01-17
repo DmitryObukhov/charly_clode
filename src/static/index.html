@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charly Neural Simulation</title>
+    <style>
+        body { margin: 0; background: #111; color: #eee; font-family: monospace; display: flex; flex-direction: column; height: 100vh; }
+        #controls { padding: 10px; background: #222; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid #444; }
+        button { padding: 5px 15px; background: #444; color: #fff; border: 1px solid #666; cursor: pointer; }
+        button:hover { background: #555; }
+        #status { flex-grow: 1; text-align: right; margin-right: 20px; font-size: 14px; }
+        #viewport { flex-grow: 1; position: relative; overflow: hidden; display: flex; justify-content: center; align-items: center; background: #000; }
+        canvas { max-width: 100%; max-height: 100%; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="btn-start">Start</button>
+        <button id="btn-stop">Stop</button>
+        <button id="btn-step">Step</button>
+        <div id="status">Connecting...</div>
+    </div>
+    <div id="viewport">
+        <img id="vis-image" src="" alt="Waiting for server..." />
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -114,6 +114,26 @@ class PhysicalModel(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def save_state_to_file(self, path: str) -> None:
+        """
+        Save the complete model state to a file.
+        
+        Args:
+            path: Absolute path to the save file.
+        """
+        pass
+
+    @abc.abstractmethod
+    def load_state_from_file(self, path: str) -> None:
+        """
+        Load the model state from a file.
+        
+        Args:
+            path: Absolute path to the save file.
+        """
+        pass
+
     def save_state(self) -> None:
         """Record current state to history."""
         snapshot = self._get_state_snapshot()
