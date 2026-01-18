@@ -1,6 +1,6 @@
 # Charly - Neuromorphic Simulation Framework
 
-**Version 0.4** - Arc Visualization & Multi-Finger Control
+**Version 0.5** - HTTP Server Mode
 
 Charly is a neuromorphic cellular automaton simulation that tests whether a neural substrate can learn to react appropriately to a physical model of reality.
 
@@ -9,7 +9,11 @@ Charly is a neuromorphic cellular automaton simulation that tests whether a neur
 ```batch
 cd src
 
-# Arc visualization (recommended) - connectome as horizontal chain with arcs
+# Server mode (recommended) - web-based control with live visualization
+python main.py --serve --name mysim --config ../config/config.yaml
+# Then open http://localhost:8000 in browser
+
+# Arc visualization - connectome as horizontal chain with arcs
 python main.py --arc
 
 # Live visualization - scrolling neural activity heatmap
@@ -44,6 +48,7 @@ charly/
 │   ├── physical_model.py   # Abstract base class
 │   ├── model_linear.py     # Linear 1D world
 │   ├── charly.py           # Neural substrate
+│   ├── server.py           # HTTP server mode
 │   └── main.py             # CLI application
 ├── devlogs/            # Conversation exports
 ├── CLAUDE.md           # Claude Code guide
@@ -91,7 +96,36 @@ The project uses a prompt-driven development approach:
 
 ## Checkpoints
 
-### v0.4 - Arc Visualization & Multi-Finger Control (Current)
+### v0.5 - HTTP Server Mode (Current)
+
+Web-based control and monitoring with persistent state.
+
+**Server Mode** (`--serve`):
+- HTTP server with web UI at `http://localhost:<port>/`
+- Controls: Start, Pause, Stop, Step (+1, +10, +100, +1000)
+- Real-time metrics: iteration, day, ESP/ESN, agent/lamp positions
+- Neuron activity matrix visualization (all neurons as pixels)
+- Activation history coloring (bright=current, dim=previous steps)
+
+**State Persistence**:
+- Simulations stored in `simulations/<name>/` directory
+- JSON serialization of neurons, connectome, RNG state
+- Resume from saved state: `--serve --name mysim` (no config needed)
+- Auto-save every 1000 iterations
+
+**Usage**:
+```batch
+# New simulation
+python main.py --serve --name mysim --config ../config/config.yaml
+
+# Resume existing
+python main.py --serve --name mysim
+
+# Specify port
+python main.py --serve --name mysim --port 8080
+```
+
+### v0.4 - Arc Visualization & Multi-Finger Control
 
 New visualization mode and expanded Sauron's Finger system.
 
