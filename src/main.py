@@ -1066,6 +1066,8 @@ Examples:
   python main.py --days 5
   python main.py --config ../config/config.yaml --days 10 --fps 60
   python main.py --days 3 --no-video --output results
+  python main.py --serve --name mysim --config ../config/config.yaml
+  python main.py --serve --name mysim --port 8080  # Resume existing
         """
     )
 
@@ -1095,9 +1097,38 @@ Examples:
     parser.add_argument('--arc', '-a', action='store_true',
                        help='Run with arc visualization (neurons as chain, connections as arcs)')
 
+    parser.add_argument('--serve', '-s', action='store_true',
+                       help='Run as HTTP server with web-based control')
+
+    parser.add_argument('--name', '-n', type=str, default=None,
+                       help='Simulation name (required for --serve mode, used as directory name)')
+
+    parser.add_argument('--port', '-p', type=int, default=0,
+                       help='HTTP port for server mode (default: auto-allocate)')
+
     args = parser.parse_args()
 
-    # Check config file exists
+    # Handle serve mode
+    if args.serve:
+        if not args.name:
+            print("Error: --name is required for server mode")
+            print("Usage: python main.py --serve --name mysim --config ../config/config.yaml")
+            sys.exit(1)
+
+        # Config is optional if resuming (will check in server)
+        config_path = args.config if os.path.exists(args.config) else None
+
+        try:
+            from server import run_server
+            run_server(args.name, config_path, args.port)
+        except KeyboardInterrupt:
+            print("\nServer stopped")
+        except Exception as e:
+            print(f"Server error: {e}")
+            sys.exit(1)
+        return
+
+    # Check config file exists (required for non-serve modes)
     if not os.path.exists(args.config):
         print(f"Error: Configuration file not found: {args.config}")
         print("Create a config file or specify path with --config")

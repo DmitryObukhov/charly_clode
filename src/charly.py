@@ -1302,6 +1302,208 @@ class Charly:
 
         return img
 
+    # =========================================================================
+    # Serialization Methods for Server Mode
+    # =========================================================================
+
+    def _serialize_neurons(self) -> List[Dict]:
+        """Convert neuron list to JSON-serializable format."""
+        return [
+            {
+                'name': n.name,
+                'active': n.active,
+                'eq': int(n.eq),
+                'cumulative_signal': float(n.cumulative_signal),
+                'elastic_trigger': float(n.elastic_trigger),
+                'charge': float(n.charge),
+                'elastic_recharge': float(n.elastic_recharge),
+                'charge_cycle': int(n.charge_cycle),
+                'history': n.history,
+                'fatigue': float(n.fatigue)
+            }
+            for n in self.current
+        ]
+
+    def _deserialize_neurons(self, data: List[Dict]) -> None:
+        """Restore neurons from JSON data."""
+        self.current = []
+        self.next = []
+        for d in data:
+            neuron = Neuron(
+                name=d.get('name', ''),
+                active=d.get('active', False),
+                eq=d.get('eq', 0),
+                cumulative_signal=d.get('cumulative_signal', 0.0),
+                elastic_trigger=d.get('elastic_trigger', 0.0),
+                charge=d.get('charge', 0.0),
+                elastic_recharge=d.get('elastic_recharge', 0.0),
+                charge_cycle=d.get('charge_cycle', 0),
+                history=d.get('history', ''),
+                fatigue=d.get('fatigue', 0.0)
+            )
+            self.current.append(neuron)
+            self.next.append(neuron.clone())
+
+    def _serialize_connectome(self) -> Dict:
+        """Convert connectome to JSON-serializable format."""
+        return {
+            'synapses': [
+                {
+                    'src': int(s.src),
+                    'dst': int(s.dst),
+                    'weight': float(s.weight)
+                }
+                for s in self.connectome.synapses
+            ]
+        }
+
+    def _deserialize_connectome(self, data: Dict) -> None:
+        """Restore connectome from JSON data."""
+        self.connectome = Connectome()
+        for s in data.get('synapses', []):
+            self.connectome.add(s['src'], s['dst'], s['weight'])
+
+    def _serialize_rng(self) -> Dict:
+        """Capture random generator state."""
+        state = self.rng.getstate()
+        return {
+            'state': [state[0], list(state[1]), state[2]]
+        }
+
+    def _deserialize_rng(self, data: Dict) -> None:
+        """Restore random generator state."""
+        state_data = data.get('state', [])
+        if len(state_data) == 3:
+            state = (state_data[0], tuple(state_data[1]), state_data[2])
+            self.rng.setstate(state)
+
+    def save_state(self, directory: str) -> bool:
+        """
+        Save complete simulation state to JSON files.
+
+        Creates:
+        - state.json: Neuron states and connectome
+        - metadata.json: Iteration counters, timestamps
+        - rng_state.json: Random generator state
+
+        Args:
+            directory: Directory path to save state files
+
+        Returns:
+            True if saved successfully
+        """
+        import json
+        from datetime import datetime
+
+        os.makedirs(directory, exist_ok=True)
+
+        try:
+            # Save neurons and connectome
+            state_data = {
+                'neurons': self._serialize_neurons(),
+                'connectome': self._serialize_connectome()
+            }
+            state_path = os.path.join(directory, 'state.json')
+            with open(state_path, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f)
+
+            # Save metadata
+            metadata = {
+                'iteration': self.iteration,
+                'day_index': self.day_index,
+                'neuron_count': self.neuron_count,
+                'head_count': self.head_count,
+                'updated_at': datetime.now().isoformat()
+            }
+            metadata_path = os.path.join(directory, 'metadata.json')
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+
+            # Save RNG state
+            rng_data = self._serialize_rng()
+            rng_path = os.path.join(directory, 'rng_state.json')
+            with open(rng_path, 'w', encoding='utf-8') as f:
+                json.dump(rng_data, f)
+
+            self.log(f"State saved to {directory}")
+            return True
+
+        except Exception as e:
+            self.log(f"Error saving state: {e}")
+            return False
+
+    def load_state(self, directory: str) -> bool:
+        """
+        Load simulation state from JSON files.
+
+        Args:
+            directory: Directory path containing state files
+
+        Returns:
+            True if state was loaded successfully
+        """
+        import json
+
+        state_path = os.path.join(directory, 'state.json')
+        metadata_path = os.path.join(directory, 'metadata.json')
+        rng_path = os.path.join(directory, 'rng_state.json')
+
+        if not os.path.exists(state_path):
+            self.log(f"No state file found at {state_path}")
+            return False
+
+        try:
+            # Load neurons and connectome
+            with open(state_path, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+
+            self._deserialize_neurons(state_data.get('neurons', []))
+            self._deserialize_connectome(state_data.get('connectome', {}))
+
+            # Load metadata
+            if os.path.exists(metadata_path):
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    metadata = json.load(f)
+                self.iteration = metadata.get('iteration', 0)
+                self.day_index = metadata.get('day_index', 0)
+
+            # Load RNG state
+            if os.path.exists(rng_path):
+                with open(rng_path, 'r', encoding='utf-8') as f:
+                    rng_data = json.load(f)
+                self._deserialize_rng(rng_data)
+
+            # Re-identify stars after loading
+            self._identify_stars()
+
+            self.log(f"State loaded from {directory} (iteration={self.iteration}, day={self.day_index})")
+            return True
+
+        except Exception as e:
+            self.log(f"Error loading state: {e}")
+            return False
+
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get current simulation status for server API.
+
+        Returns:
+            Dictionary with current state information
+        """
+        active_count = sum(1 for n in self.current if n.active)
+        esp = sum(n.eq for n in self.current if n.active and n.eq > 0)
+        esn = sum(n.eq for n in self.current if n.active and n.eq < 0)
+
+        return {
+            'iteration': self.iteration,
+            'day_index': self.day_index,
+            'neuron_count': self.neuron_count,
+            'active_neurons': active_count,
+            'esp': esp,
+            'esn': esn,
+            'synapse_count': len(self.connectome.synapses)
+        }
+
 
 if __name__ == "__main__":
     import argparse
